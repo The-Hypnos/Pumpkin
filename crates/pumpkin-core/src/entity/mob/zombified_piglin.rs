@@ -114,6 +114,10 @@ impl Mob for ZombifiedPiglinEntity {
         &self.mob_entity
     }
 
+    fn mob_is_baby(&self) -> bool {
+        self.get_entity().age.load(Ordering::Relaxed) < 0
+    }
+
     fn spawn_as_baby(&self) -> bool {
         self.mob_entity.set_baby_by_age();
         true

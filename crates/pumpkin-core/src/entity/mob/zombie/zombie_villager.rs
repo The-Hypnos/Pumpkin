@@ -261,6 +261,10 @@ impl Mob for ZombieVillagerEntity {
         &self.mob_entity.mob_entity
     }
 
+    fn mob_is_baby(&self) -> bool {
+        self.mob_entity.is_baby()
+    }
+
     fn spawn_as_baby(&self) -> bool {
         self.mob_entity.spawn_as_baby()
     }

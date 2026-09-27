@@ -9,21 +9,29 @@ use crate::world::World;
 use super::memory::{MemoryModuleId, types};
 use super::{BrainTick, VisibilityContext};
 
+pub mod adult;
 pub mod dummy;
+pub mod golem;
 pub mod hurt_by;
+pub mod is_in_water;
 pub mod nearest_items;
 pub mod nearest_living_entities;
 pub mod nearest_players;
 pub mod piglin_brute_specific;
 pub mod piglin_specific;
+pub mod tempting;
 
+pub use adult::{AdultSensor, AdultSensorAnyType};
 pub use dummy::DummySensor;
+pub use golem::{GOLEM_SCAN_RATE, GolemSensor};
 pub use hurt_by::HurtBySensor;
+pub use is_in_water::IsInWaterSensor;
 pub use nearest_items::NearestItemSensor;
 pub use nearest_living_entities::NearestLivingEntitySensor;
 pub use nearest_players::PlayerSensor;
 pub use piglin_brute_specific::PiglinBruteSpecificSensor;
 pub use piglin_specific::PiglinSpecificSensor;
+pub use tempting::TemptingSensor;
 
 pub const DEFAULT_SCAN_RATE: i32 = 20;
 
@@ -41,6 +49,11 @@ pub enum SensorType {
     HurtBy,
     PiglinSpecific,
     PiglinBruteSpecific,
+    GolemDetected,
+    NearestAdult,
+    NearestAdultAnyType,
+    FoodTemptations,
+    IsInWater,
 }
 
 impl SensorType {
@@ -54,6 +67,11 @@ impl SensorType {
             Self::HurtBy => "minecraft:hurt_by",
             Self::PiglinSpecific => "minecraft:piglin_specific_sensor",
             Self::PiglinBruteSpecific => "minecraft:piglin_brute_specific_sensor",
+            Self::GolemDetected => "minecraft:golem_detected",
+            Self::NearestAdult => "minecraft:nearest_adult",
+            Self::NearestAdultAnyType => "minecraft:nearest_adult_any_type",
+            Self::FoodTemptations => "minecraft:food_temptations",
+            Self::IsInWater => "minecraft:is_in_water",
         }
     }
 
@@ -66,7 +84,12 @@ impl SensorType {
             | Self::NearestItems
             | Self::HurtBy
             | Self::PiglinSpecific
-            | Self::PiglinBruteSpecific => DEFAULT_SCAN_RATE,
+            | Self::PiglinBruteSpecific
+            | Self::NearestAdult
+            | Self::NearestAdultAnyType
+            | Self::FoodTemptations
+            | Self::IsInWater => DEFAULT_SCAN_RATE,
+            Self::GolemDetected => GOLEM_SCAN_RATE,
         }
     }
 
@@ -79,6 +102,11 @@ impl SensorType {
             Self::HurtBy => Box::new(HurtBySensor),
             Self::PiglinSpecific => Box::new(PiglinSpecificSensor),
             Self::PiglinBruteSpecific => Box::new(PiglinBruteSpecificSensor),
+            Self::GolemDetected => Box::new(GolemSensor),
+            Self::NearestAdult => Box::new(AdultSensor),
+            Self::NearestAdultAnyType => Box::new(AdultSensorAnyType),
+            Self::FoodTemptations => Box::new(TemptingSensor::for_animal()),
+            Self::IsInWater => Box::new(IsInWaterSensor),
         }
     }
 

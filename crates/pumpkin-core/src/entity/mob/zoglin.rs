@@ -142,6 +142,10 @@ impl Mob for ZoglinEntity {
         &self.mob_entity
     }
 
+    fn mob_is_baby(&self) -> bool {
+        self.is_baby.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     fn finalize_spawn(
         &self,
         _world: &Arc<World>,

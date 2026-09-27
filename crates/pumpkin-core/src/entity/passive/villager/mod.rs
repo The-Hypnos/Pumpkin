@@ -2177,6 +2177,11 @@ impl Mob for VillagerEntity {
         &self.mob_entity
     }
 
+    // Villagers keep their baby timer in the entity age rather than through `AgeableMob`.
+    fn mob_is_baby(&self) -> bool {
+        self.get_entity().age.load(Ordering::Relaxed) < 0
+    }
+
     fn mob_bedrock_identifier(&self) -> Option<&'static str> {
         Some("minecraft:villager_v2")
     }

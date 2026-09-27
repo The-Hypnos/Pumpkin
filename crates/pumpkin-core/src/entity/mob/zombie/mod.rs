@@ -159,6 +159,10 @@ impl Mob for ZombieEntityBase {
         &self.mob_entity
     }
 
+    fn mob_is_baby(&self) -> bool {
+        self.is_baby()
+    }
+
     fn spawn_as_baby(&self) -> bool {
         self.set_baby(true);
         true

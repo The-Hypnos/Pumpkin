@@ -1,10 +1,17 @@
 use pumpkin_data::tracked_data;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::Relaxed};
 
+use crate::entity::EntityBase;
 use crate::entity::mob::Mob;
 
 pub const BABY_START_AGE: i32 = -24000;
 pub const FORCED_AGE_PARTICLE_TICKS: i32 = 40;
+
+/// Vanilla `LivingEntity.isBaby`, for any entity.
+#[must_use]
+pub fn is_baby(entity: &dyn EntityBase) -> bool {
+    entity.get_mob().is_some_and(Mob::mob_is_baby)
+}
 
 pub struct AgeableData {
     pub forced_age: AtomicI32,
