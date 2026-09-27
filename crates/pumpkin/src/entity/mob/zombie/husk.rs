@@ -31,6 +31,10 @@ impl Mob for HuskEntity {
         &self.entity.mob_entity
     }
 
+    fn mob_is_baby(&self) -> bool {
+        self.entity.is_baby()
+    }
+
     fn spawn_as_baby(&self) -> bool {
         self.entity.spawn_as_baby()
     }

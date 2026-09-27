@@ -516,6 +516,10 @@ impl Mob for PiglinEntity {
         &self.mob_entity
     }
 
+    fn mob_is_baby(&self) -> bool {
+        self.is_baby()
+    }
+
     fn populate_default_equipment_slots(
         &self,
         _world: &Arc<World>,
