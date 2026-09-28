@@ -5,11 +5,20 @@ use super::super::memory::walk_target::WalkTarget;
 use super::super::memory::{MemoryStatus, types};
 use super::one_shot::OneShot;
 use super::utils::is_within_attack_range;
+use crate::entity::mob::Mob;
 
 const PROJECTILE_ATTACK_RANGE_BUFFER: i32 = 1;
 
 #[must_use]
 pub fn set_walk_target_from_attack_target_if_target_out_of_reach(speed_modifier: f32) -> OneShot {
+    set_walk_target_from_attack_target_if_target_out_of_reach_with_speed(move |_| speed_modifier)
+}
+
+/// As above, with the speed chosen per mob each time, like vanilla's `Function<LivingEntity, Float>`.
+#[must_use]
+pub fn set_walk_target_from_attack_target_if_target_out_of_reach_with_speed(
+    speed_modifier: impl Fn(&dyn Mob) -> f32 + Send + Sync + 'static,
+) -> OneShot {
     OneShot::with_required(
         "SetWalkTargetFromAttackTargetIfTargetOutOfReach",
         vec![(types::ATTACK_TARGET.id(), MemoryStatus::ValuePresent)],
@@ -49,7 +58,7 @@ pub fn set_walk_target_from_attack_target_if_target_out_of_reach(speed_modifier:
                     types::WALK_TARGET,
                     WalkTarget::new(
                         Arc::new(EntityTracker::new(target, false)),
-                        speed_modifier,
+                        speed_modifier(tick.mob),
                         0,
                     ),
                 );

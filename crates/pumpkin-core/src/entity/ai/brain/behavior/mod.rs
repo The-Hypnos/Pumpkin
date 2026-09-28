@@ -74,8 +74,13 @@ pub use set_look_and_interact::set_look_and_interact;
 pub use set_walk_target_away_from::{
     entity as set_walk_target_away_from_entity, pos as set_walk_target_away_from_pos,
 };
-pub use set_walk_target_from_attack_target::set_walk_target_from_attack_target_if_target_out_of_reach;
-pub use set_walk_target_from_look_target::set_walk_target_from_look_target;
+pub use set_walk_target_from_attack_target::{
+    set_walk_target_from_attack_target_if_target_out_of_reach,
+    set_walk_target_from_attack_target_if_target_out_of_reach_with_speed,
+};
+pub use set_walk_target_from_look_target::{
+    set_walk_target_from_look_target, set_walk_target_from_look_target_with_speed,
+};
 pub use shuffling_list::ShufflingList;
 pub use start_attacking::start_attacking;
 pub use start_celebrating_if_target_dead::start_celebrating_if_target_dead;
@@ -83,7 +88,7 @@ pub use stop_attacking_if_target_invalid::stop_attacking_if_target_invalid;
 pub use stop_being_angry_if_target_dead::stop_being_angry_if_target_dead;
 pub use stroll_to_poi::{stroll_around_poi, stroll_to_poi};
 pub use timed::{Behavior, DEFAULT_DURATION, NO_TIMEOUT, Timed};
-pub use try_find_land::{try_find_land, try_find_land_near_liquid};
+pub use try_find_land::{try_find_land, try_find_land_near_liquid, try_find_liquid};
 pub use try_lay_spawn_on_fluid_near_land::try_lay_spawn_on_fluid_near_land;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

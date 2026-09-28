@@ -1,18 +1,19 @@
 use std::sync::Arc;
 
 use crate::entity::ageable::is_baby;
+use crate::entity::mob::Mob;
 
 use super::super::memory::position_tracker::{EntityTracker, PositionTracker};
 use super::super::memory::walk_target::WalkTarget;
 use super::super::memory::{MemoryStatus, types};
 use super::one_shot::OneShot;
 
-/// Vanilla `BabyFollowAdult.create(followRange, speedModifier)`, following `NEAREST_VISIBLE_ADULT`.
+/// Vanilla `BabyFollowAdult.create`, following `NEAREST_VISIBLE_ADULT`.
 #[must_use]
 pub fn baby_follow_adult(
     min_follow_range: i32,
     max_follow_range: i32,
-    speed_modifier: f32,
+    speed_modifier: impl Fn(&dyn Mob) -> f32 + Send + Sync + 'static,
 ) -> OneShot {
     let too_far = f64::from(max_follow_range + 1);
     let close_enough = f64::from(min_follow_range);
@@ -50,7 +51,7 @@ pub fn baby_follow_adult(
             );
             tick.brain.set(
                 types::WALK_TARGET,
-                WalkTarget::from_entity(adult, speed_modifier, min_follow_range - 1),
+                WalkTarget::from_entity(adult, speed_modifier(tick.mob), min_follow_range - 1),
             );
             true
         },

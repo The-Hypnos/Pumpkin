@@ -1,9 +1,8 @@
 use std::sync::{
-    Arc, Weak,
+    Arc,
     atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
-use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
@@ -12,22 +11,17 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use rand::RngExt;
 
+use crate::entity::ai::brain::behavior::utils::is_alive;
+use crate::entity::ai::brain::memory::{PackedMemories, types};
+use crate::entity::ai::brain::{Brain, BrainTick};
+use crate::entity::passive::axolotl_ai;
 use crate::entity::{
     Entity, EntityBase,
     ageable::{AgeableData, AgeableMob},
-    ai::goal::{
-        active_target::ActiveTargetGoal, breed::BreedGoal, escape_danger::EscapeDangerGoal,
-        follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, revenge::RevengeGoal,
-        swim::SwimGoal, tempt::TemptGoal, try_find_water::TryFindWaterGoal,
-        wander_around::WanderAroundGoal,
-    },
     mob::{Mob, MobEntity},
     passive::animal::Animal,
     player::Player,
 };
-
-const TEMPT_ITEMS: &[&Item] = &[&Item::TROPICAL_FISH_BUCKET];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(i32)]
@@ -79,8 +73,9 @@ pub struct AxolotlEntity {
     pub variant: AtomicI32,
     pub playing_dead: AtomicBool,
     pub from_bucket: AtomicBool,
-    pub play_dead_ticks: AtomicI32,
 }
+
+const PLAY_DEAD_TICKS_ON_HURT: i32 = 200;
 
 impl AxolotlEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
@@ -92,87 +87,10 @@ impl AxolotlEntity {
             variant: AtomicI32::new(variant.id()),
             playing_dead: AtomicBool::new(false),
             from_bucket: AtomicBool::new(false),
-            play_dead_ticks: AtomicI32::new(0),
         };
-        let mob_arc = Arc::new(axolotl);
-        let mob_weak: Weak<dyn Mob> = {
-            let mob_arc: Arc<dyn Mob> = mob_arc.clone();
-            Arc::downgrade(&mob_arc)
-        };
-
-        {
-            let mut goal_selector = mob_arc
-                .mob_entity
-                .goals_selector
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-
-            goal_selector.add_goal(0, Box::new(TryFindWaterGoal));
-            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
-            goal_selector.add_goal(1, EscapeDangerGoal::new(1.5));
-            goal_selector.add_goal(2, BreedGoal::new(1.0));
-            goal_selector.add_goal(3, Box::new(TemptGoal::new(1.25, TEMPT_ITEMS, false)));
-            goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.25)));
-            goal_selector.add_goal(5, Box::new(MeleeAttackGoal::new(1.2, false)));
-            goal_selector.add_goal(6, Box::new(WanderAroundGoal::new(1.0)));
-            goal_selector.add_goal(
-                7,
-                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
-            );
-            goal_selector.add_goal(8, Box::new(RandomLookAroundGoal::default()));
-        };
-
-        {
-            let mut target_selector = mob_arc
-                .mob_entity
-                .target_selector
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
-            target_selector.add_goal(
-                2,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::DROWNED, false),
-            );
-            target_selector.add_goal(
-                2,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::GUARDIAN, false),
-            );
-            target_selector.add_goal(
-                2,
-                ActiveTargetGoal::with_default(
-                    &mob_arc.mob_entity,
-                    &EntityType::ELDER_GUARDIAN,
-                    false,
-                ),
-            );
-            target_selector.add_goal(
-                3,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::SQUID, false),
-            );
-            target_selector.add_goal(
-                3,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::GLOW_SQUID, false),
-            );
-            target_selector.add_goal(
-                3,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::COD, false),
-            );
-            target_selector.add_goal(
-                3,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::SALMON, false),
-            );
-            target_selector.add_goal(
-                3,
-                ActiveTargetGoal::with_default(
-                    &mob_arc.mob_entity,
-                    &EntityType::TROPICAL_FISH,
-                    false,
-                ),
-            );
-        };
-
-        mob_arc
+        let axolotl = Arc::new(axolotl);
+        axolotl.mob_entity.init_brain(axolotl.as_ref());
+        axolotl
     }
 
     #[must_use]
@@ -261,14 +179,52 @@ impl Mob for AxolotlEntity {
 
     fn mob_tick(&self, _caller: &dyn EntityBase) {
         self.ageable_ai_step();
+    }
 
-        let play_dead_ticks = self.play_dead_ticks.load(Ordering::Relaxed);
-        if play_dead_ticks > 0 {
-            let remaining = play_dead_ticks - 1;
-            self.play_dead_ticks.store(remaining, Ordering::Relaxed);
-            if remaining == 0 {
-                self.set_playing_dead(false);
+    fn make_brain(&self, packed: &PackedMemories) -> Brain {
+        axolotl_ai::AXOLOTL_PROVIDER.make_brain(self, packed)
+    }
+
+    fn after_brain_tick(&self, tick: &mut BrainTick<'_>) {
+        axolotl_ai::update_activity(tick);
+        if !self.mob_entity.is_no_ai() {
+            let playing_dead = tick
+                .brain
+                .get(types::PLAY_DEAD_TICKS)
+                .is_some_and(|ticks| *ticks > 0);
+            if playing_dead != self.is_playing_dead() {
+                self.set_playing_dead(playing_dead);
             }
+        }
+    }
+
+    fn custom_server_ai_step(&self, _caller: &dyn EntityBase) {
+        if !is_alive(self) {
+            self.mob_entity.apply_brain_inbox(self);
+            return;
+        }
+        self.mob_entity.tick_brain(self);
+    }
+
+    /// Vanilla `Axolotl.hurtServer`: a hurt axolotl in water may start playing dead.
+    fn before_hurt(&self, amount: f32, has_source_entity: bool) {
+        let living = &self.mob_entity.living_entity;
+        let current_health = living.health.load();
+        let mut rng = self.get_random();
+        if !self.mob_entity.is_no_ai()
+            && rng.random_range(0..3) == 0
+            && ((rng.random_range(0..3) as f32) < amount
+                || current_health / living.get_max_health() < 0.5)
+            && amount < current_health
+            && self.get_entity().is_in_water()
+            && has_source_entity
+            && !self.is_playing_dead()
+        {
+            // Queued: this can run inside another mob's brain tick
+            self.mob_entity.post_to_brain(Box::new(|tick| {
+                tick.brain
+                    .set(types::PLAY_DEAD_TICKS, PLAY_DEAD_TICKS_ON_HURT);
+            }));
         }
     }
 

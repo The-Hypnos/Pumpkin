@@ -1078,6 +1078,10 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn on_attack(&self, _target: &dyn EntityBase) {}
 
+    /// Runs where a vanilla `hurtServer` override does its work before `super.hurtServer`,
+    /// with the incoming damage and whether the source has an entity behind it.
+    fn before_hurt(&self, _amount: f32, _has_source_entity: bool) {}
+
     /// Vanilla `Mob.doHurtTarget`, which the brain's `MeleeAttack` lands its hits through.
     fn do_hurt_target(&self, target: &dyn EntityBase) {
         self.get_mob_entity().try_attack(self.get_entity(), target);
@@ -1611,6 +1615,7 @@ impl<T: Mob + Send + 'static> EntityBase for T {
         if !self.pre_damage(damage_type, source) {
             return false;
         }
+        self.before_hurt(amount, source.is_some() || cause.is_some());
         // Mob-specific damage modifier (e.g. shulker armor when closed).
         let amount = self.modify_incoming_damage(amount, damage_type);
         let damaged = self.get_mob_entity().living_entity.damage_with_context(

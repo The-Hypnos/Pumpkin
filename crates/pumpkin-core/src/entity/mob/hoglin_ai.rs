@@ -91,7 +91,7 @@ fn init_idle_activity() -> ActivityData {
             Box::new(behavior::baby_follow_adult(
                 ADULT_FOLLOW_RANGE.0,
                 ADULT_FOLLOW_RANGE.1,
-                SPEED_MULTIPLIER_WHEN_FOLLOWING_ADULT,
+                |_| SPEED_MULTIPLIER_WHEN_FOLLOWING_ADULT,
             )),
             idle_movement_behaviors(),
         ],

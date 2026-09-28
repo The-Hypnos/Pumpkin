@@ -13,6 +13,7 @@ use super::memory::{MemoryModuleId, types};
 use super::{BrainTick, VisibilityContext};
 
 pub mod adult;
+pub mod axolotl_attackables;
 pub mod dummy;
 pub mod frog_attackables;
 pub mod golem;
@@ -27,6 +28,7 @@ pub mod piglin_specific;
 pub mod tempting;
 
 pub use adult::{AdultSensor, AdultSensorAnyType};
+pub use axolotl_attackables::AxolotlAttackablesSensor;
 pub use dummy::DummySensor;
 pub use frog_attackables::FrogAttackablesSensor;
 pub use golem::{GOLEM_SCAN_RATE, GolemSensor};
@@ -64,6 +66,7 @@ pub enum SensorType {
     HoglinSpecific,
     FrogTemptations,
     FrogAttackables,
+    AxolotlAttackables,
 }
 
 impl SensorType {
@@ -85,6 +88,7 @@ impl SensorType {
             Self::HoglinSpecific => "minecraft:hoglin_specific_sensor",
             Self::FrogTemptations => "minecraft:frog_temptations",
             Self::FrogAttackables => "minecraft:frog_attackables",
+            Self::AxolotlAttackables => "minecraft:axolotl_attackables",
         }
     }
 
@@ -104,7 +108,8 @@ impl SensorType {
             | Self::IsInWater
             | Self::HoglinSpecific
             | Self::FrogTemptations
-            | Self::FrogAttackables => DEFAULT_SCAN_RATE,
+            | Self::FrogAttackables
+            | Self::AxolotlAttackables => DEFAULT_SCAN_RATE,
             Self::GolemDetected => GOLEM_SCAN_RATE,
         }
     }
@@ -126,6 +131,7 @@ impl SensorType {
             Self::HoglinSpecific => Box::new(HoglinSpecificSensor),
             Self::FrogTemptations => Box::new(TemptingSensor::new(frog_ai::is_temptation)),
             Self::FrogAttackables => Box::new(FrogAttackablesSensor),
+            Self::AxolotlAttackables => Box::new(AxolotlAttackablesSensor),
         }
     }
 
