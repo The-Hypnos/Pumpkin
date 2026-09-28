@@ -82,7 +82,7 @@ impl JitteredLinearRetry {
 /// path to, remembering it in `memory_to_acquire`.
 #[must_use]
 pub fn acquire_poi(
-    poi_type: fn(PoiType) -> bool,
+    poi_type: impl Fn(PoiType) -> bool + Send + Sync + 'static,
     memory_to_validate: MemoryModuleType<GlobalPos>,
     memory_to_acquire: MemoryModuleType<GlobalPos>,
     only_if_adult: bool,
@@ -116,7 +116,7 @@ pub fn acquire_poi(
             .world
             .poi_manager
             .find_all_closest_first_with_type(
-                poi_type,
+                &poi_type,
                 |pos| match batch_cache.get_mut(pos) {
                     None => true,
                     Some(retry) if retry.should_retry(time) => {
@@ -142,7 +142,7 @@ pub fn acquire_poi(
                 // time there. Mobs tick in parallel here, so another one may have just won it.
                 if poi_manager.get_type(&target).is_some()
                     && poi_manager
-                        .take(tick.world, poi_type, |_, pos| *pos == target, &target, 1)
+                        .take(tick.world, &poi_type, |_, pos| *pos == target, &target, 1)
                         .is_some()
                 {
                     if let Some(global) = global_pos_in(tick.world, target) {

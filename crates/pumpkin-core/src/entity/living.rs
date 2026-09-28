@@ -1835,6 +1835,13 @@ impl LivingEntity {
         strength + self.get_jump_boost_power()
     }
 
+    /// Vanilla `LivingEntity.wasHurtRecently`. Vanilla's 10-tick `hurtTime` starts with the
+    /// 20-tick invulnerability kept in `hurt_cooldown`, so it runs while more than 10 remain.
+    #[must_use]
+    pub fn was_hurt_recently(&self) -> bool {
+        self.hurt_cooldown.load(Relaxed) > 10
+    }
+
     /// Vanilla `LivingEntity.getJumpBoostPower`.
     pub fn get_jump_boost_power(&self) -> f64 {
         self.get_effect(&StatusEffect::JUMP_BOOST)

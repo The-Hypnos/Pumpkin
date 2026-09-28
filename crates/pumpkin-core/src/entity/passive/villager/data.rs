@@ -16,6 +16,27 @@ pub const fn get_food_points(item: &Item) -> i32 {
     }
 }
 
+/// Vanilla `VillagerType.byBiome`: the look a villager born in `biome` gets.
+#[must_use]
+pub fn villager_type_for_biome(biome: &pumpkin_data::chunk::Biome) -> VillagerType {
+    match biome.registry_id {
+        "badlands" | "desert" | "eroded_badlands" | "wooded_badlands" => VillagerType::Desert,
+        "bamboo_jungle" | "jungle" | "sparse_jungle" => VillagerType::Jungle,
+        "savanna_plateau" | "savanna" | "windswept_savanna" => VillagerType::Savanna,
+        "deep_frozen_ocean" | "frozen_ocean" | "frozen_river" | "ice_spikes" | "snowy_beach"
+        | "snowy_taiga" | "snowy_plains" | "grove" | "snowy_slopes" | "frozen_peaks"
+        | "jagged_peaks" => VillagerType::Snow,
+        "swamp" | "mangrove_swamp" => VillagerType::Swamp,
+        "old_growth_spruce_taiga"
+        | "old_growth_pine_taiga"
+        | "windswept_gravelly_hills"
+        | "windswept_hills"
+        | "taiga"
+        | "windswept_forest" => VillagerType::Taiga,
+        _ => VillagerType::Plains,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[repr(i32)]
 pub enum GossipType {
@@ -79,6 +100,16 @@ impl GossipType {
             Self::MinorNegative => 200,
             Self::MajorPositive => 20,
             Self::MinorPositive | Self::Trading => 25,
+        }
+    }
+
+    /// Vanilla `GossipType.decayPerTransfer`: how much a rumour weakens each time it is passed on.
+    #[must_use]
+    pub const fn decay_per_transfer(self) -> i32 {
+        match self {
+            Self::MajorNegative => 10,
+            Self::MinorNegative | Self::MajorPositive | Self::Trading => 20,
+            Self::MinorPositive => 5,
         }
     }
 

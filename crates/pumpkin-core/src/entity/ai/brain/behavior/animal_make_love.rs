@@ -10,7 +10,7 @@ use crate::entity::passive::animal::spawn_child_from_breeding;
 use super::super::BrainTick;
 use super::super::memory::{MemoryModuleId, MemoryStatus, types};
 use super::timed::Behavior;
-use super::utils::{entity_is_visible, is_alive, set_walk_and_look_target_memories_to_entity};
+use super::utils::{entity_is_visible, is_alive, lock_gaze_and_walk_to_each_other, post_to_other};
 
 const BREED_RANGE: f64 = 3.0;
 const MIN_DURATION: i32 = 60;
@@ -65,28 +65,17 @@ impl AnimalMakeLove {
         tick.brain.get(types::BREED_TARGET).map(Arc::clone)
     }
 
-    /// Vanilla `BehaviorUtils.lockGazeAndWalkToEachOther`; the partner's half lands next tick.
     fn lock_gaze_and_walk_to_each_other(
         &self,
         tick: &mut BrainTick<'_>,
         partner: &Arc<dyn EntityBase>,
     ) {
-        let speed_modifier = self.speed_modifier;
-        let close_enough_distance = self.close_enough_distance;
-        set_walk_and_look_target_memories_to_entity(
-            tick.brain,
-            Arc::clone(partner),
-            speed_modifier,
-            close_enough_distance,
+        lock_gaze_and_walk_to_each_other(
+            tick,
+            partner,
+            self.speed_modifier,
+            self.close_enough_distance,
         );
-        post_to_partner(tick, partner, move |partner_tick, body| {
-            set_walk_and_look_target_memories_to_entity(
-                partner_tick.brain,
-                body,
-                speed_modifier,
-                close_enough_distance,
-            );
-        });
     }
 }
 
@@ -99,22 +88,6 @@ fn can_mate(body: &dyn Mob, partner: &dyn EntityBase) -> bool {
         && body
             .as_animal()
             .is_none_or(|animal| animal.can_mate(partner))
-}
-
-/// Queues `write` on the partner's brain, handing it this body; vanilla writes it inline.
-fn post_to_partner(
-    tick: &BrainTick<'_>,
-    partner: &Arc<dyn EntityBase>,
-    write: impl FnOnce(&mut BrainTick<'_>, Arc<dyn EntityBase>) + Send + 'static,
-) {
-    let Some(partner_mob) = partner.as_mob_entity() else {
-        return;
-    };
-    let body_id = tick.mob.get_entity().entity_id;
-    let Some(body) = tick.world.get_entity_by_id(body_id) else {
-        return;
-    };
-    partner_mob.post_to_brain(Box::new(move |partner_tick| write(partner_tick, body)));
 }
 
 impl Behavior for AnimalMakeLove {
@@ -139,7 +112,7 @@ impl Behavior for AnimalMakeLove {
             return;
         };
         tick.brain.set(types::BREED_TARGET, Arc::clone(&partner));
-        post_to_partner(tick, &partner, |partner_tick, body| {
+        post_to_other(tick, &partner, |partner_tick, body| {
             partner_tick.brain.set(types::BREED_TARGET, body);
         });
         self.lock_gaze_and_walk_to_each_other(tick, &partner);
@@ -180,7 +153,7 @@ impl Behavior for AnimalMakeLove {
                 None => spawn_child_from_breeding(body, partner.as_ref()),
             }
             tick.brain.erase(types::BREED_TARGET.id());
-            post_to_partner(tick, &partner, |partner_tick, _| {
+            post_to_other(tick, &partner, |partner_tick, _| {
                 partner_tick.brain.erase(types::BREED_TARGET.id());
             });
         }

@@ -87,6 +87,16 @@ pub fn interact_with_door() -> OneShot {
     )
 }
 
+/// Vanilla `closeDoorsThatIHaveOpenedOrPassedThrough` with no path nodes, as `SleepInBed`
+/// calls it before lying down.
+pub fn close_doors_i_passed_through(tick: &mut BrainTick<'_>) {
+    let Some(mut doors) = tick.brain.get(types::DOORS_TO_CLOSE).cloned() else {
+        return;
+    };
+    close_doors_i_opened_or_passed_through(tick, &mut doors, None, None);
+    tick.brain.set(types::DOORS_TO_CLOSE, doors);
+}
+
 fn is_mob_interactable_door(world: &World, pos: &BlockPos) -> bool {
     world
         .get_block(pos)
