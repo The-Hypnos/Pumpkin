@@ -4,6 +4,7 @@ use pumpkin_data::entity::EntityType;
 use rand::RngExt;
 
 use crate::entity::EntityBase;
+use crate::entity::mob::Mob;
 use crate::entity::passive::animal::spawn_child_from_breeding;
 
 use super::super::BrainTick;
@@ -89,12 +90,15 @@ impl AnimalMakeLove {
     }
 }
 
-/// Vanilla `Animal.canMate`: another animal of the same type, both in love.
-fn can_mate(body: &dyn EntityBase, partner: &dyn EntityBase) -> bool {
+/// Vanilla `Animal.canMate`: another animal of the same type, both in love, plus any override.
+fn can_mate(body: &dyn Mob, partner: &dyn EntityBase) -> bool {
     partner.get_entity().entity_id != body.get_entity().entity_id
         && partner.get_entity().entity_type == body.get_entity().entity_type
         && body.is_in_love()
         && partner.is_in_love()
+        && body
+            .as_animal()
+            .is_none_or(|animal| animal.can_mate(partner))
 }
 
 /// Queues `write` on the partner's brain, handing it this body; vanilla writes it inline.
