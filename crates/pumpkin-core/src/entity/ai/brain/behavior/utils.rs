@@ -1,9 +1,13 @@
 use std::sync::Arc;
 
+use pumpkin_data::entity::EntityType;
+use pumpkin_data::item_stack::ItemStack;
+use pumpkin_util::math::vector3::Vector3;
 use uuid::Uuid;
 
-use crate::entity::EntityBase;
 use crate::entity::ai::util::default_random_pos;
+use crate::entity::item::ItemEntity;
+use crate::entity::{Entity, EntityBase};
 use crate::world::World;
 
 use super::super::memory::position_tracker::{BlockPosTracker, EntityTracker, PositionTracker};
@@ -65,6 +69,37 @@ pub fn look_at_entity(brain: &mut Brain, target: Arc<dyn EntityBase>) {
         types::LOOK_TARGET,
         Arc::new(EntityTracker::new(target, true)) as Arc<dyn PositionTracker>,
     );
+}
+
+/// Vanilla `BehaviorUtils.throwItem`: tosses `item` from hand height toward `target`.
+pub fn throw_item(
+    thrower: &dyn EntityBase,
+    item: ItemStack,
+    target: Vector3<f64>,
+    throw_velocity: Vector3<f64>,
+    hand_y_distance_from_eye: f32,
+) {
+    let entity = thrower.get_entity();
+    let world = entity.world.load_full();
+    let pos = entity.pos.load();
+    let hand_pos = Vector3::new(
+        pos.x,
+        entity.get_eye_y() - f64::from(hand_y_distance_from_eye),
+        pos.z,
+    );
+    let direction = (target - pos).normalize();
+    let velocity = Vector3::new(
+        direction.x * throw_velocity.x,
+        direction.y * throw_velocity.y,
+        direction.z * throw_velocity.z,
+    );
+    let item_entity = ItemEntity::new_with_velocity(
+        Entity::new(Arc::clone(&world), hand_pos, &EntityType::ITEM),
+        item,
+        velocity,
+        ItemEntity::DEFAULT_PICKUP_DELAY,
+    );
+    world.spawn_entity(Arc::new(item_entity));
 }
 
 pub fn set_walk_and_look_target_memories(

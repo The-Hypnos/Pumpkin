@@ -1,4 +1,5 @@
 pub mod allay;
+pub mod allay_ai;
 pub mod animal;
 pub mod armadillo;
 pub mod armadillo_ai;
