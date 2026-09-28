@@ -4,7 +4,7 @@ use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::ai::brain::sensing::find_first_in_box_by_manhattan_distance;
 use crate::entity::ai::util::goal_utils::is_water_state;
-use crate::entity::ai::util::land_random_pos;
+use crate::entity::ai::util::{air_and_water_random_pos, land_random_pos};
 use crate::entity::mob::Mob;
 use crate::world::World;
 
@@ -21,7 +21,7 @@ const WATER_SEARCH_HORIZONTAL: i32 = 5;
 const WATER_SEARCH_VERTICAL: i32 = 1;
 
 pub type PanicCauses = fn(&dyn Mob) -> &'static Tag;
-pub type PanicPos = fn(&dyn Mob) -> Option<Vector3<f64>>;
+pub type PanicPos = Box<dyn Fn(&dyn Mob) -> Option<Vector3<f64>> + Send + Sync>;
 
 /// Vanilla `AnimalPanic`: flees after taking a panic-causing hit, towards water when burning.
 pub struct AnimalPanic {
@@ -31,18 +31,51 @@ pub struct AnimalPanic {
     position_getter: PanicPos,
 }
 
+fn default_panic_causes(_mob: &dyn Mob) -> &'static Tag {
+    &tag::DamageType::MINECRAFT_PANIC_CAUSES
+}
+
 impl AnimalPanic {
     #[must_use]
     pub fn new(speed_multiplier: f32) -> Self {
+        Self::with_causes(speed_multiplier, default_panic_causes)
+    }
+
+    /// Vanilla `AnimalPanic(speed, panicCausingDamageTypes)`.
+    #[must_use]
+    pub fn with_causes(speed_multiplier: f32, panic_causing_damage_types: PanicCauses) -> Self {
         Self::with(
             speed_multiplier,
-            |_| &tag::DamageType::MINECRAFT_PANIC_CAUSES,
-            |mob| land_random_pos::get_pos(mob, PANIC_DISTANCE_HORIZONTAL, PANIC_DISTANCE_VERTICAL),
+            panic_causing_damage_types,
+            Box::new(|mob| {
+                land_random_pos::get_pos(mob, PANIC_DISTANCE_HORIZONTAL, PANIC_DISTANCE_VERTICAL)
+            }),
+        )
+    }
+
+    /// Vanilla `AnimalPanic(speed, flyHeight)`: flees through air and water.
+    #[must_use]
+    pub fn flying(speed_multiplier: f32, fly_height: i32) -> Self {
+        Self::with(
+            speed_multiplier,
+            default_panic_causes,
+            Box::new(move |mob| {
+                let view = mob.get_looking_vector();
+                air_and_water_random_pos::get_pos(
+                    mob,
+                    PANIC_DISTANCE_HORIZONTAL,
+                    PANIC_DISTANCE_VERTICAL,
+                    fly_height,
+                    view.x,
+                    view.z,
+                    std::f64::consts::FRAC_PI_2,
+                )
+            }),
         )
     }
 
     #[must_use]
-    pub const fn with(
+    pub fn with(
         speed_multiplier: f32,
         panic_causing_damage_types: PanicCauses,
         position_getter: PanicPos,
