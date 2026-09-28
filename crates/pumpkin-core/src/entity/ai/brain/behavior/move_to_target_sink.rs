@@ -218,6 +218,12 @@ impl Behavior for MoveToTargetSink {
                 Some(path) => tick.brain.set(types::PATH, path.copy()),
                 None => tick.brain.erase(types::PATH.id()),
             }
+        } else if let Some(navigator_path) = navigator_path
+            && let Some(memory_path) = tick.brain.get_mut(types::PATH)
+        {
+            // Vanilla's memory holds the navigation's own path, so it advances as the mob
+            // walks; this copy has to follow along or door handling never sees the door.
+            memory_path.set_next_node_index(navigator_path.get_next_node_index());
         }
 
         if self.path.is_none() {

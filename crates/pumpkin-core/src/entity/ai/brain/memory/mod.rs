@@ -212,6 +212,16 @@ impl MemoryStore {
             .downcast_ref::<T>()
     }
 
+    pub fn get_mut<T: MemoryValue>(&mut self, key: MemoryModuleType<T>) -> Option<&mut T> {
+        self.slots
+            .get_mut(key.id.index())?
+            .as_mut()?
+            .value
+            .as_mut()?
+            .as_any_mut()
+            .downcast_mut::<T>()
+    }
+
     #[must_use]
     pub fn time_until_expiry(&self, id: MemoryModuleId) -> Option<i64> {
         self.slots
