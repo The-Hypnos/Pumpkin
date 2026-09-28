@@ -184,19 +184,9 @@ fn get_chest_screen_handler_factory(
         ChestType::Right => Some(chest_props.facing.rotate_counter_clockwise()),
     };
 
-    let unpack = |entity: &Arc<dyn BlockEntity>| {
-        if let Some((loot_key, seed)) = entity.take_loot_table()
-            && let Some(table) = get_loot_table(&loot_key)
-            && let Some(inv) = entity.clone().get_inventory()
-        {
-            fill_chest_inventory(&inv, table, seed);
-            inv.mark_dirty();
-        }
-    };
-
     // Unpack deferred loot table on first open (non-spectator only).
     if !player_is_spectator && let Some(ref entity) = first_chest {
-        unpack(entity);
+        unpack_loot_table(entity);
     }
 
     let first_inventory = first_chest.and_then(BlockEntity::get_inventory)?;
@@ -219,7 +209,7 @@ fn get_chest_screen_handler_factory(
             .world
             .get_block_entity(&args.position.offset(direction.to_offset()))
     {
-        unpack(&second);
+        unpack_loot_table(&second);
     }
 
     let inventory = if let Some(direction) = connected_towards
@@ -590,9 +580,63 @@ fn get_chest_properties_if_can_connect(
     None
 }
 
-fn is_chest_blocked(world: &World, block_pos: &BlockPos) -> bool {
+/// Fills a chest from its deferred loot table, as vanilla `RandomizableContainer.unpackLootTable`.
+pub fn unpack_loot_table(entity: &Arc<dyn BlockEntity>) {
+    if let Some((loot_key, seed)) = entity.take_loot_table()
+        && let Some(table) = get_loot_table(&loot_key)
+        && let Some(inv) = entity.clone().get_inventory()
+    {
+        fill_chest_inventory(&inv, table, seed);
+        inv.mark_dirty();
+    }
+}
+
+pub fn is_chest_blocked(world: &World, block_pos: &BlockPos) -> bool {
     // TODO: Block opening when a cat is sitting on top.
     has_block_on_top(world, block_pos)
+}
+
+/// Vanilla `ChestBlock.getConnectedBlockPos`: the other half of a double chest.
+#[must_use]
+pub fn get_connected_block_pos(pos: &BlockPos, state_id: BlockStateId) -> Option<BlockPos> {
+    let props = ChestLikeProperties::from_state_id(state_id);
+    let towards = match props.r#type {
+        ChestType::Single => return None,
+        ChestType::Left => props.facing.rotate_clockwise(),
+        ChestType::Right => props.facing.rotate_counter_clockwise(),
+    };
+    Some(pos.offset(towards.to_offset()))
+}
+
+/// Vanilla `ChestBlock.getContainer` with `ignoreBeingBlocked` off: the chest's inventory, joined
+/// with its other half for a double chest, or `None` while either half is blocked.
+pub fn get_container(world: &World, pos: &BlockPos) -> Option<Arc<dyn Inventory>> {
+    let first = world
+        .get_block_entity(pos)
+        .and_then(BlockEntity::get_inventory)?;
+    if is_chest_blocked(world, pos) {
+        return None;
+    }
+    let state_id = world.get_block_state_id(pos);
+    let Some(neighbor_pos) = get_connected_block_pos(pos, state_id) else {
+        return Some(first);
+    };
+    if is_chest_blocked(world, &neighbor_pos) {
+        return None;
+    }
+    let Some(second) = world
+        .get_block_entity(&neighbor_pos)
+        .and_then(BlockEntity::get_inventory)
+    else {
+        return Some(first);
+    };
+    Some(
+        if ChestLikeProperties::from_state_id(state_id).r#type == ChestType::Right {
+            DoubleInventory::new(first, second)
+        } else {
+            DoubleInventory::new(second, first)
+        },
+    )
 }
 fn has_block_on_top(world: &World, block_pos: &BlockPos) -> bool {
     let above_pos = block_pos.up();

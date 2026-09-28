@@ -16,7 +16,9 @@ use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::vector3::Vector3;
 use uuid::Uuid;
 
-use crate::entity::ai::brain::behavior::utils::{is_alive, throw_item};
+use crate::entity::ai::brain::behavior::utils::{
+    DEFAULT_THROW_HAND_Y_DISTANCE, DEFAULT_THROW_VELOCITY, is_alive, throw_item,
+};
 use crate::entity::ai::brain::memory::{PackedMemories, types};
 use crate::entity::ai::brain::{Brain, BrainTick};
 use crate::entity::item::ItemEntity;
@@ -448,7 +450,13 @@ impl Mob for AllayEntity {
             self.mob_entity.living_entity.swing_hand();
             let stored = self.take_inventory();
             if !stored.is_empty() {
-                throw_item(self, stored, pos, Vector3::new(0.3, 0.3, 0.3), 0.3);
+                throw_item(
+                    self,
+                    stored,
+                    pos,
+                    DEFAULT_THROW_VELOCITY,
+                    DEFAULT_THROW_HAND_Y_DISTANCE,
+                );
             }
             self.liked_player.store(None);
             self.mob_entity.with_brain(self, |tick| {
