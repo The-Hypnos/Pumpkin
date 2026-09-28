@@ -1,7 +1,10 @@
 use super::BrainTick;
 use super::memory::MemoryModuleId;
 
+pub mod animal_make_love;
+pub mod baby_follow_adult;
 pub mod back_up_if_too_close;
+pub mod become_passive_if_memory_present;
 pub mod copy_memory_with_expiry;
 pub mod crossbow_attack;
 pub mod dismount_or_skip_mounting;
@@ -33,7 +36,10 @@ pub mod stroll_to_poi;
 pub mod timed;
 pub mod utils;
 
+pub use animal_make_love::AnimalMakeLove;
+pub use baby_follow_adult::baby_follow_adult;
 pub use back_up_if_too_close::back_up_if_too_close;
+pub use become_passive_if_memory_present::become_passive_if_memory_present;
 pub use copy_memory_with_expiry::copy_memory_with_expiry;
 pub use crossbow_attack::CrossbowAttack;
 pub use dismount_or_skip_mounting::dismount_or_skip_mounting;

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use pumpkin_util::math::position::BlockPos;
 use rand::{Rng, RngExt};
 
 use crate::entity::ai::target_predicate::TargetPredicate;
@@ -12,6 +13,7 @@ use super::{BrainTick, VisibilityContext};
 pub mod adult;
 pub mod dummy;
 pub mod golem;
+pub mod hoglin_specific;
 pub mod hurt_by;
 pub mod is_in_water;
 pub mod nearest_items;
@@ -24,6 +26,7 @@ pub mod tempting;
 pub use adult::{AdultSensor, AdultSensorAnyType};
 pub use dummy::DummySensor;
 pub use golem::{GOLEM_SCAN_RATE, GolemSensor};
+pub use hoglin_specific::HoglinSpecificSensor;
 pub use hurt_by::HurtBySensor;
 pub use is_in_water::IsInWaterSensor;
 pub use nearest_items::NearestItemSensor;
@@ -54,6 +57,7 @@ pub enum SensorType {
     NearestAdultAnyType,
     FoodTemptations,
     IsInWater,
+    HoglinSpecific,
 }
 
 impl SensorType {
@@ -72,6 +76,7 @@ impl SensorType {
             Self::NearestAdultAnyType => "minecraft:nearest_adult_any_type",
             Self::FoodTemptations => "minecraft:food_temptations",
             Self::IsInWater => "minecraft:is_in_water",
+            Self::HoglinSpecific => "minecraft:hoglin_specific_sensor",
         }
     }
 
@@ -88,7 +93,8 @@ impl SensorType {
             | Self::NearestAdult
             | Self::NearestAdultAnyType
             | Self::FoodTemptations
-            | Self::IsInWater => DEFAULT_SCAN_RATE,
+            | Self::IsInWater
+            | Self::HoglinSpecific => DEFAULT_SCAN_RATE,
             Self::GolemDetected => GOLEM_SCAN_RATE,
         }
     }
@@ -107,6 +113,7 @@ impl SensorType {
             Self::NearestAdultAnyType => Box::new(AdultSensorAnyType),
             Self::FoodTemptations => Box::new(TemptingSensor::for_animal()),
             Self::IsInWater => Box::new(IsInWaterSensor),
+            Self::HoglinSpecific => Box::new(HoglinSpecificSensor),
         }
     }
 
@@ -194,6 +201,39 @@ fn entities_in_inflated_box(
         .collect();
     found.sort_by(|a, b| a.0.total_cmp(&b.0));
     found.into_iter().map(|(_, entity)| entity).collect()
+}
+
+/// First position matching `predicate`, in vanilla `BlockPos.withinBoxByManhattanDistance` order.
+pub fn find_first_in_box_by_manhattan_distance(
+    center: BlockPos,
+    reach_xz: i32,
+    reach_y: i32,
+    mut predicate: impl FnMut(&BlockPos) -> bool,
+) -> Option<BlockPos> {
+    let max_depth = reach_xz + reach_y + reach_xz;
+    for depth in 0..=max_depth {
+        let max_x = reach_xz.min(depth);
+        for x in -max_x..=max_x {
+            let max_y = reach_y.min(depth - x.abs());
+            for y in -max_y..=max_y {
+                let z = depth - x.abs() - y.abs();
+                if z > reach_xz {
+                    continue;
+                }
+                let pos = BlockPos::new(center.0.x + x, center.0.y + y, center.0.z + z);
+                if predicate(&pos) {
+                    return Some(pos);
+                }
+                if z != 0 {
+                    let mirrored = BlockPos::new(pos.0.x, pos.0.y, center.0.z - z);
+                    if predicate(&mirrored) {
+                        return Some(mirrored);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn is_current_attack_target(ctx: &VisibilityContext<'_>, target: &dyn EntityBase) -> bool {

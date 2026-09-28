@@ -51,6 +51,8 @@ pub mod ghast;
 pub mod giant;
 pub mod guardian;
 pub mod hoglin;
+pub mod hoglin_ai;
+pub mod hoglin_base;
 pub mod illusioner;
 pub mod magma_cube;
 pub mod neutral;
@@ -1080,6 +1082,11 @@ pub trait Mob: EntityBase + Send + Sync {
     fn on_damage(&self, _damage_type: DamageType, _source: Option<&dyn EntityBase>) {}
 
     fn on_attack(&self, _target: &dyn EntityBase) {}
+
+    /// Vanilla `Mob.doHurtTarget`, which the brain's `MeleeAttack` lands its hits through.
+    fn do_hurt_target(&self, target: &dyn EntityBase) {
+        self.get_mob_entity().try_attack(self.get_entity(), target);
+    }
 
     fn on_eating_grass(&self) {}
 

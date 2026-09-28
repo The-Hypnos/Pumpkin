@@ -12,7 +12,7 @@ use crate::world::World;
 
 use super::super::BrainTick;
 use super::super::memory::{MemoryModuleId, NearestVisibleLivingEntities, types};
-use super::Sensor;
+use super::{Sensor, find_first_in_box_by_manhattan_distance};
 
 const REPELLENT_DETECTION_RANGE_HORIZONTAL: i32 = 8;
 const REPELLENT_DETECTION_RANGE_VERTICAL: i32 = 4;
@@ -172,34 +172,13 @@ fn scan_visible(tick: &BrainTick<'_>) -> Scan {
     scan
 }
 
-/// Vanilla walks `BlockPos.withinManhattan`, so equidistant repellents may tie differently.
 fn find_nearest_repellent(world: &World, center: BlockPos) -> Option<BlockPos> {
-    let max_distance =
-        REPELLENT_DETECTION_RANGE_HORIZONTAL * 2 + REPELLENT_DETECTION_RANGE_VERTICAL;
-    for distance in 0..=max_distance {
-        for y in -REPELLENT_DETECTION_RANGE_VERTICAL..=REPELLENT_DETECTION_RANGE_VERTICAL {
-            let remaining = distance - y.abs();
-            if remaining < 0 {
-                continue;
-            }
-            for x in -REPELLENT_DETECTION_RANGE_HORIZONTAL..=REPELLENT_DETECTION_RANGE_HORIZONTAL {
-                let z_abs = remaining - x.abs();
-                if !(0..=REPELLENT_DETECTION_RANGE_HORIZONTAL).contains(&z_abs) {
-                    continue;
-                }
-                for z in [z_abs, -z_abs] {
-                    let pos = BlockPos::new(center.0.x + x, center.0.y + y, center.0.z + z);
-                    if is_valid_repellent(world, &pos) {
-                        return Some(pos);
-                    }
-                    if z_abs == 0 {
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    None
+    find_first_in_box_by_manhattan_distance(
+        center,
+        REPELLENT_DETECTION_RANGE_HORIZONTAL,
+        REPELLENT_DETECTION_RANGE_VERTICAL,
+        |pos| is_valid_repellent(world, pos),
+    )
 }
 
 fn is_valid_repellent(world: &World, pos: &BlockPos) -> bool {
