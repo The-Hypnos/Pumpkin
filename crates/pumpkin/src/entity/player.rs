@@ -4501,11 +4501,11 @@ impl Player {
             let player_pos = self.living_entity.entity.block_pos.load();
             let pos_f64 = self.living_entity.entity.pos.load();
 
+            // Vanilla `BadOmenMobEffect`: the raid centres on the player, if they stand in a village.
             let village_pos = world
-                .villager_poi
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .get_nearest_job_site(player_pos, 64)
+                .poi_manager
+                .is_village(&player_pos)
+                .then_some(player_pos)
                 .or_else(|| {
                     world.raids.try_lock().ok().and_then(|raids| {
                         raids

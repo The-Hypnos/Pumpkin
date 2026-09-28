@@ -34,7 +34,6 @@ pub mod raid;
 pub mod random_sequences;
 pub mod stopwatches;
 pub mod time;
-pub mod villager_poi;
 
 use crate::block::RandomTickArgs;
 use crate::world::chunker::is_within_chebyshev_distance;
@@ -284,8 +283,6 @@ pub struct World {
     unsent_block_changes: std::sync::Mutex<HashMap<BlockPos, BlockStateId>>,
     /// Persisted vanilla POI storage for portal and villager lookups.
     pub portal_poi: std::sync::Mutex<portal::PortalPoiStorage>,
-    /// Villager job sites and their current owners.
-    pub villager_poi: std::sync::Mutex<villager_poi::VillagerPoiStorage>,
     pub poi_manager: poi_manager::PoiManager,
     /// Active raids in this world.
     pub raids: std::sync::Mutex<raid::Raids>,
@@ -428,7 +425,6 @@ impl World {
             synced_block_event_queue: std::sync::Mutex::new(Vec::new()),
             unsent_block_changes: std::sync::Mutex::new(HashMap::new()),
             portal_poi: std::sync::Mutex::new(portal_poi),
-            villager_poi: std::sync::Mutex::new(villager_poi::VillagerPoiStorage::default()),
             poi_manager: poi_manager::PoiManager::default(),
             raids: std::sync::Mutex::new(raid::Raids::default()),
             dragon_fight,
@@ -5160,7 +5156,6 @@ impl World {
 
     /// Everything `set_block_state` does after the chunk write: callbacks, neighbour updates,
     /// client sync, POI and lighting.
-    #[expect(clippy::too_many_lines)]
     fn on_block_state_set(
         self: &Arc<Self>,
         position: &BlockPos,
@@ -5254,11 +5249,6 @@ impl World {
                     neighbour_update_flags,
                 );
             }
-
-            self.villager_poi
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .update_block(*position, new_block);
 
             self.poi_manager.on_block_changed(
                 self,
