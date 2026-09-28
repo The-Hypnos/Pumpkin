@@ -8,7 +8,19 @@ use crate::world::World;
 use crate::entity::ai::pathfinder::amphibious_node_evaluator::AmphibiousNodeEvaluator;
 use crate::entity::ai::pathfinder::binary_heap::BinaryHeap;
 use crate::entity::ai::pathfinder::fly_node_evaluator::FlyNodeEvaluator;
-use crate::entity::ai::pathfinder::node::Node;
+use crate::entity::ai::pathfinder::node::{Node, Target};
+
+/// Vanilla `Pathfinder.getBestH`: the distance to the nearest target, noting on each target
+/// the closest node seen so far.
+fn best_h(node: &Node, targets: &mut [Target]) -> f32 {
+    let mut best = f32::MAX;
+    for target in targets {
+        let distance = node.distance(target);
+        target.update_best(distance, node);
+        best = best.min(distance);
+    }
+    best
+}
 use crate::entity::ai::pathfinder::node::PathType;
 use crate::entity::ai::pathfinder::node_evaluator::{MobData, NodeEvaluator};
 use crate::entity::ai::pathfinder::path::Path;
@@ -396,6 +408,14 @@ pub trait PathNavigationTrait: Send + Sync {
         destination: Vector3<f64>,
         reach_range: i32,
     ) -> Option<Path>;
+    /// Vanilla `PathNavigation.createPath(Set<BlockPos>, int)`: one path to whichever target
+    /// is found first.
+    fn create_path_to_any(
+        &mut self,
+        entity: &LivingEntity,
+        targets: &[BlockPos],
+        reach_range: i32,
+    ) -> Option<Path>;
     fn recompute_path(&mut self, entity: &LivingEntity);
     fn set_avoid_sun(&mut self, avoid_sun: bool);
     fn set_can_walk_over_fences(&mut self, can_walk: bool);
@@ -613,11 +633,23 @@ impl PathNavigation {
         follow_range.max(self.required_path_length)
     }
 
-    #[allow(clippy::too_many_lines)]
     pub fn compute_path(
         &mut self,
         entity: &LivingEntity,
         destination: Vector3<f64>,
+        reach_range: i32,
+    ) -> Option<Path> {
+        self.compute_path_to_any(entity, &[BlockPos::floored_v(destination)], reach_range)
+    }
+
+    /// Vanilla `Pathfinder.findPath` over several targets: one search that stops at the first
+    /// target it reaches. With none reached, the path ends nearest to whichever target it got
+    /// closest to.
+    #[allow(clippy::too_many_lines)]
+    pub fn compute_path_to_any(
+        &mut self,
+        entity: &LivingEntity,
+        destinations: &[BlockPos],
         reach_range: i32,
     ) -> Option<Path> {
         let start_pos_f = entity.entity.pos.load();
@@ -647,12 +679,16 @@ impl PathNavigation {
         self.evaluator.prepare(context, mob_data);
 
         let mut start_node = self.evaluator.get_start()?;
-        let mut target = self.evaluator.get_target(BlockPos::floored_v(destination));
+        let mut targets: Vec<Target> = destinations
+            .iter()
+            .map(|destination| self.evaluator.get_target(*destination))
+            .collect();
+        if targets.is_empty() {
+            return None;
+        }
 
         start_node.g = 0.0;
-        let start_dist = start_node.distance(&target);
-        target.update_best(start_dist, &start_node);
-        start_node.h = start_dist;
+        start_node.h = best_h(&start_node, &mut targets);
         start_node.f = start_node.h;
         start_node.walked_dist = 0.0;
         start_node.came_from = None;
@@ -681,10 +717,14 @@ impl PathNavigation {
                 break;
             };
 
-            if current.distance_manhattan(&target) <= reach_range as f32 {
-                target.reached = true;
-                reached = true;
-                target.update_best(0.0, &current);
+            for target in &mut targets {
+                if current.distance_manhattan(target) <= reach_range as f32 {
+                    target.reached = true;
+                    reached = true;
+                    target.update_best(0.0, &current);
+                }
+            }
+            if reached {
                 closed_set.insert(current.pos.0, current);
                 break;
             }
@@ -718,9 +758,7 @@ impl PathNavigation {
                 {
                     neighbor.came_from = Some(current.pos.0);
                     neighbor.g = tentative_g;
-                    let dist_to_target = neighbor.distance(&target);
-                    target.update_best(dist_to_target, &neighbor);
-                    neighbor.h = dist_to_target * TARGET_DISTANCE_MULTIPLIER;
+                    neighbor.h = best_h(&neighbor, &mut targets) * TARGET_DISTANCE_MULTIPLIER;
                     neighbor.f = neighbor.g + neighbor.h;
 
                     if in_heap {
@@ -740,7 +778,7 @@ impl PathNavigation {
             closed_set.entry(node.pos.0).or_insert(node);
         }
 
-        if let Some(best_node) = target.best_node {
+        let reconstruct = |best_node: Node| {
             let mut path_nodes: Vec<Node> = Vec::new();
             let mut current_pos = best_node.pos.0;
             path_nodes.push(best_node);
@@ -762,12 +800,24 @@ impl PathNavigation {
                 }
             }
             path_nodes.reverse();
+            path_nodes
+        };
 
-            let path_target = target.node.pos;
-            return Some(Path::new(path_nodes, path_target, reached));
-        }
-
-        None
+        // Vanilla keeps the shortest path to a reached target, or else the one that ended
+        // closest to its target, shortest first on ties.
+        targets
+            .iter()
+            .filter(|target| target.reached == reached)
+            .filter_map(|target| target.best_node.map(|best| (target, reconstruct(best))))
+            .min_by(|(a, a_nodes), (b, b_nodes)| {
+                let by_distance = if reached {
+                    std::cmp::Ordering::Equal
+                } else {
+                    a.best_heuristic.total_cmp(&b.best_heuristic)
+                };
+                by_distance.then(a_nodes.len().cmp(&b_nodes.len()))
+            })
+            .map(|(target, nodes)| Path::new(nodes, target.node.pos, reached))
     }
 
     pub fn needs_new_path(&self, goal: &NavigatorGoal) -> bool {
@@ -1348,6 +1398,15 @@ impl PathNavigationTrait for GroundPathNavigation {
         self.inner.compute_path(entity, dest_v, reach_range)
     }
 
+    fn create_path_to_any(
+        &mut self,
+        entity: &LivingEntity,
+        targets: &[BlockPos],
+        reach_range: i32,
+    ) -> Option<Path> {
+        self.inner.compute_path_to_any(entity, targets, reach_range)
+    }
+
     fn recompute_path(&mut self, entity: &LivingEntity) {
         let world_age = entity.entity.world.load().get_world_age() as u64;
         if world_age.saturating_sub(self.inner.time_last_recompute) <= 20 {
@@ -1633,6 +1692,15 @@ impl PathNavigationTrait for FlyingPathNavigation {
         reach_range: i32,
     ) -> Option<Path> {
         self.inner.compute_path(entity, destination, reach_range)
+    }
+
+    fn create_path_to_any(
+        &mut self,
+        entity: &LivingEntity,
+        targets: &[BlockPos],
+        reach_range: i32,
+    ) -> Option<Path> {
+        self.inner.compute_path_to_any(entity, targets, reach_range)
     }
 
     fn recompute_path(&mut self, entity: &LivingEntity) {
@@ -1926,6 +1994,15 @@ impl PathNavigationTrait for WaterBoundPathNavigation {
         self.inner.compute_path(entity, destination, reach_range)
     }
 
+    fn create_path_to_any(
+        &mut self,
+        entity: &LivingEntity,
+        targets: &[BlockPos],
+        reach_range: i32,
+    ) -> Option<Path> {
+        self.inner.compute_path_to_any(entity, targets, reach_range)
+    }
+
     fn recompute_path(&mut self, entity: &LivingEntity) {
         let world_age = entity.entity.world.load().get_world_age() as u64;
         if world_age.saturating_sub(self.inner.time_last_recompute) <= 20 {
@@ -2163,6 +2240,15 @@ impl PathNavigationTrait for WallClimberNavigation {
     ) -> Option<Path> {
         self.path_to_position = Some(BlockPos::floored_v(destination));
         self.inner.create_path(entity, destination, reach_range)
+    }
+
+    fn create_path_to_any(
+        &mut self,
+        entity: &LivingEntity,
+        targets: &[BlockPos],
+        reach_range: i32,
+    ) -> Option<Path> {
+        self.inner.create_path_to_any(entity, targets, reach_range)
     }
 
     fn recompute_path(&mut self, entity: &LivingEntity) {
@@ -2442,6 +2528,15 @@ impl PathNavigationTrait for AmphibiousPathNavigation {
         reach_range: i32,
     ) -> Option<Path> {
         self.inner.compute_path(entity, destination, reach_range)
+    }
+
+    fn create_path_to_any(
+        &mut self,
+        entity: &LivingEntity,
+        targets: &[BlockPos],
+        reach_range: i32,
+    ) -> Option<Path> {
+        self.inner.compute_path_to_any(entity, targets, reach_range)
     }
 
     fn recompute_path(&mut self, entity: &LivingEntity) {
