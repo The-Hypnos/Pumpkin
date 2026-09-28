@@ -24,6 +24,7 @@ pub mod melee_attack;
 pub mod mount;
 pub mod move_to_target_sink;
 pub mod one_shot;
+pub mod ram;
 pub mod random_look_around;
 pub mod random_stroll;
 pub mod set_entity_look_target;
@@ -67,6 +68,7 @@ pub use melee_attack::melee_attack;
 pub use mount::mount;
 pub use move_to_target_sink::MoveToTargetSink;
 pub use one_shot::{OneShot, Trigger};
+pub use ram::{PrepareRamNearestTarget, RamTarget};
 pub use random_look_around::RandomLookAround;
 pub use random_stroll::{fly, stroll, stroll_with_range, swim};
 pub use set_entity_look_target::{

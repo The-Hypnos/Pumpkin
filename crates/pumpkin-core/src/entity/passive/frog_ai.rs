@@ -283,7 +283,7 @@ fn init_jump_activity() -> ActivityData {
                         MAX_LONG_JUMP_HEIGHT,
                         MAX_LONG_JUMP_WIDTH,
                         MAX_JUMP_VELOCITY_MULTIPLIER,
-                        Sound::EntityFrogLongJump,
+                        |_| Sound::EntityFrogLongJump,
                         is_acceptable_landing_spot,
                     )
                     .preferring(

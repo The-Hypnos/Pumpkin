@@ -125,9 +125,11 @@ pub struct LongJumpToRandomPos {
     max_long_jump_height: i32,
     max_long_jump_width: i32,
     max_jump_velocity_multiplier: f32,
-    jump_sound: Sound,
+    jump_sound: fn(&dyn Mob) -> Sound,
     acceptable_landing_spot: LandingSpotCheck,
     preferred: Option<(&'static Tag, f32)>,
+    /// Vanilla sizes the jump arc check with `getDimensions(Pose.LONG_JUMPING)`.
+    jump_dimensions_scale: f32,
     jump_candidates: Vec<PossibleJump>,
     not_preferred_jump_candidates: Vec<PossibleJump>,
     currently_wanting_preferred_ones: bool,
@@ -144,7 +146,7 @@ impl LongJumpToRandomPos {
         max_long_jump_height: i32,
         max_long_jump_width: i32,
         max_jump_velocity_multiplier: f32,
-        jump_sound: Sound,
+        jump_sound: fn(&dyn Mob) -> Sound,
         acceptable_landing_spot: LandingSpotCheck,
     ) -> Self {
         Self {
@@ -163,6 +165,7 @@ impl LongJumpToRandomPos {
             jump_sound,
             acceptable_landing_spot,
             preferred: None,
+            jump_dimensions_scale: 1.0,
             jump_candidates: Vec::new(),
             not_preferred_jump_candidates: Vec::new(),
             currently_wanting_preferred_ones: false,
@@ -171,6 +174,13 @@ impl LongJumpToRandomPos {
             find_jump_tries: 0,
             prepare_jump_start: 0,
         }
+    }
+
+    /// For mobs whose long-jumping pose is smaller, like the goat's `scale(0.7F)`.
+    #[must_use]
+    pub const fn with_jump_dimensions_scale(mut self, scale: f32) -> Self {
+        self.jump_dimensions_scale = scale;
+        self
     }
 
     /// Vanilla `LongJumpToPreferredBlock`: with `chance`, favours landing on `tag`.
@@ -280,7 +290,14 @@ impl LongJumpToRandomPos {
             .get_attribute_value(&Attributes::JUMP_STRENGTH)
             * f64::from(self.max_jump_velocity_multiplier)) as f32;
         allowed_angles.into_iter().find_map(|angle| {
-            calculate_jump_vector_for_angle(mob, target_pos, max_jump_velocity, angle, true)
+            calculate_jump_vector_for_angle(
+                mob,
+                target_pos,
+                max_jump_velocity,
+                angle,
+                true,
+                self.jump_dimensions_scale,
+            )
         })
     }
 }
@@ -362,7 +379,7 @@ impl Behavior for LongJumpToRandomPos {
                 entity.set_velocity(chosen_jump * (length_with_jump_boost / original_length));
                 tick.brain.set(types::LONG_JUMP_MID_JUMP, true);
                 tick.world.play_sound_fine(
-                    self.jump_sound,
+                    (self.jump_sound)(tick.mob),
                     SoundCategory::Neutral,
                     &entity.pos.load(),
                     1.0,
@@ -412,6 +429,7 @@ fn calculate_jump_vector_for_angle(
     max_jump_velocity: f32,
     angle: i32,
     check_collision: bool,
+    jump_dimensions_scale: f32,
 ) -> Option<Vector3<f64>> {
     let mob_pos = mob.get_entity().pos.load();
     let direction_plane =
@@ -442,7 +460,12 @@ fn calculate_jump_vector_for_angle(
     let v0_y = v0 * sin_angle;
     if check_collision {
         let samples = (r / v0_r).ceil() as i32 * 2;
-        let dimensions = mob.get_entity().entity_dimension.load();
+        let unscaled = mob.get_entity().entity_dimension.load();
+        let dimensions = EntityDimensions {
+            width: unscaled.width * jump_dimensions_scale,
+            height: unscaled.height * jump_dimensions_scale,
+            eye_height: unscaled.eye_height * jump_dimensions_scale,
+        };
         let mut ri = 0.0;
         let mut previous: Option<Vector3<f64>> = None;
         for _ in 0..samples - 1 {
