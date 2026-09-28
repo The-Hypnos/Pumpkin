@@ -268,6 +268,8 @@ pub struct World {
     pub worldborder: std::sync::Mutex<Worldborder>,
     /// The world's time, including counting ticks for weather, time cycles, and statistics.
     pub level_time: std::sync::Mutex<LevelTime>,
+    tick_world_age: std::sync::atomic::AtomicI64,
+    tick_time_of_day: std::sync::atomic::AtomicI64,
     /// The type of dimension the world is in.
     pub dimension: Dimension,
     pub sea_level: i32,
@@ -416,6 +418,8 @@ impl World {
                 300,
             )),
             level_time: std::sync::Mutex::new(LevelTime::new()),
+            tick_world_age: std::sync::atomic::AtomicI64::new(0),
+            tick_time_of_day: std::sync::atomic::AtomicI64::new(0),
             dimension,
             weather: std::sync::Mutex::new(Weather::new()),
             block_registry,
@@ -1598,6 +1602,13 @@ impl World {
         let entity_handle = handle.clone();
 
         let t_entities = std::time::Instant::now();
+        let time = self
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.tick_world_age.store(time.world_age, Relaxed);
+        self.tick_time_of_day.store(time.time_of_day, Relaxed);
+        drop(time);
         let player_entities: Vec<Arc<dyn EntityBase>> = players
             .iter()
             .map(|player| Arc::clone(player) as Arc<dyn EntityBase>)
@@ -2528,6 +2539,19 @@ impl World {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         level_time.send_game_time_sync(server);
+    }
+
+    /// The world age as of this tick's entity phase, read without the time lock that
+    /// thousands of parallel mob ticks would otherwise queue on.
+    #[must_use]
+    pub fn tick_world_age(&self) -> i64 {
+        self.tick_world_age.load(Relaxed)
+    }
+
+    /// The day time as of this tick's entity phase, lock-free like [`Self::tick_world_age`].
+    #[must_use]
+    pub fn tick_time_of_day(&self) -> i64 {
+        self.tick_time_of_day.load(Relaxed)
     }
 
     pub fn get_time_of_day(&self) -> i64 {

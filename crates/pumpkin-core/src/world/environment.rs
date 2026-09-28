@@ -194,13 +194,13 @@ impl<'a> EnvironmentAttributes<'a> {
             sample_activity_track(
                 VillagerScheduleTimeline::BABY_VILLAGER_ACTIVITY_KEYFRAMES,
                 VillagerScheduleTimeline::PERIOD_TICKS,
-                self.world.get_time_of_day(),
+                self.world.tick_time_of_day(),
             )
         } else {
             sample_activity_track(
                 VillagerScheduleTimeline::VILLAGER_ACTIVITY_KEYFRAMES,
                 VillagerScheduleTimeline::PERIOD_TICKS,
-                self.world.get_time_of_day(),
+                self.world.tick_time_of_day(),
             )
         }
     }

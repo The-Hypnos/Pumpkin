@@ -472,7 +472,7 @@ impl MobEntity {
             return;
         }
         let world = self.living_entity.entity.world.load_full();
-        let time = world.get_world_age();
+        let time = world.tick_world_age();
         let mut brain = self
             .brain
             .lock()
@@ -490,7 +490,7 @@ impl MobEntity {
 
     pub fn tick_brain(&self, mob: &dyn Mob) {
         let world = self.living_entity.entity.world.load_full();
-        let time = world.get_world_age();
+        let time = world.tick_world_age();
         let messages = self.take_brain_messages();
         let mut brain = self
             .brain
@@ -555,7 +555,7 @@ impl MobEntity {
     /// Reaches the brain from outside a brain tick; a tick never waits on another mob's brain.
     pub fn with_brain<R>(&self, mob: &dyn Mob, f: impl FnOnce(&mut BrainTick<'_>) -> R) -> R {
         let world = self.living_entity.entity.world.load_full();
-        let time = world.get_world_age();
+        let time = world.tick_world_age();
         let mut brain = self
             .brain
             .lock()
