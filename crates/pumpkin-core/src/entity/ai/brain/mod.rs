@@ -66,7 +66,18 @@ pub struct Brain {
     core_activities: ActivitySet,
     active_activities: ActivitySet,
     default_activity: Activity,
+    schedule: Option<Schedule>,
+    last_schedule_update: i64,
 }
+
+/// Which environment attribute drives a brain's schedule, as vanilla `Brain.setSchedule`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Schedule {
+    Villager,
+    BabyVillager,
+}
+
+const SCHEDULE_UPDATE_INTERVAL: i64 = 20;
 
 impl Default for Brain {
     fn default() -> Self {
@@ -79,6 +90,8 @@ impl Default for Brain {
             core_activities: ActivitySet::single(Activity::Core),
             active_activities: ActivitySet::default(),
             default_activity: Activity::Idle,
+            schedule: None,
+            last_schedule_update: -9999,
         };
         brain.use_default_activity();
         brain
@@ -172,6 +185,25 @@ impl Brain {
 
     pub fn use_default_activity(&mut self) {
         self.set_active_activity(self.default_activity);
+    }
+
+    pub const fn set_schedule(&mut self, schedule: Schedule) {
+        self.schedule = Some(schedule);
+    }
+
+    /// Vanilla `Brain.updateActivityFromSchedule`, at most once a second.
+    pub fn update_activity_from_schedule(&mut self, world: &World, time: i64) {
+        if time - self.last_schedule_update <= SCHEDULE_UPDATE_INTERVAL {
+            return;
+        }
+        self.last_schedule_update = time;
+        let scheduled = self.schedule.map_or(Activity::Idle, |schedule| {
+            crate::world::environment::EnvironmentAttributes::new(world)
+                .get_dimension_value_activity(schedule == Schedule::BabyVillager)
+        });
+        if !self.is_active(scheduled) {
+            self.set_active_activity_if_possible(scheduled);
+        }
     }
 
     #[must_use]
@@ -420,6 +452,8 @@ impl BrainProvider {
             core_activities: ActivitySet::default(),
             active_activities: ActivitySet::default(),
             default_activity: Activity::Idle,
+            schedule: None,
+            last_schedule_update: -9999,
         }
     }
 }

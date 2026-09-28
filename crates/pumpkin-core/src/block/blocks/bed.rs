@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use crate::block::entities::bed::BedBlockEntity;
-use pumpkin_data::block_properties::BedPart;
+use pumpkin_data::block_properties::{BedPart, HorizontalFacing};
+use pumpkin_data::tag::Taggable;
+use pumpkin_util::math::vector3::Vector3;
+
+use crate::entity::dismount_helper::find_safe_dismount_location;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::translation;
 use pumpkin_data::{Block, BlockState, BlockStateId};
@@ -385,6 +389,86 @@ impl BedBlock {
             BlockFlags::NOTIFY_LISTENERS,
         );
     }
+}
+
+impl BedBlock {
+    /// Vanilla `AbstractBedBlock.findStandUpPosition`: where a mob leaving the bed stands,
+    /// trying beside the bed first and on top of it last.
+    #[must_use]
+    pub fn find_stand_up_position(
+        entity_type: &'static EntityType,
+        world: &World,
+        pos: &BlockPos,
+        forward: HorizontalFacing,
+        yaw: f32,
+    ) -> Option<Vector3<f64>> {
+        let right = forward.rotate_clockwise();
+        let side = if is_facing_angle(right, yaw) {
+            right.opposite()
+        } else {
+            right
+        };
+        let surround = bed_surround_stand_up_offsets(forward, side);
+        let above = bed_above_stand_up_offsets(forward);
+        let find = |pos: &BlockPos, offsets: &[(i32, i32)], check_dangerous: bool| {
+            offsets.iter().find_map(|(dx, dz)| {
+                find_safe_dismount_location(
+                    entity_type,
+                    world,
+                    &BlockPos::new(pos.0.x + dx, pos.0.y, pos.0.z + dz),
+                    check_dangerous,
+                )
+            })
+        };
+        if world
+            .get_block(&pos.down())
+            .has_tag(&pumpkin_data::tag::Block::MINECRAFT_BEDS)
+        {
+            let below = pos.down();
+            return find(pos, &surround, true)
+                .or_else(|| find(&below, &surround, true))
+                .or_else(|| find(pos, &above, true))
+                .or_else(|| find(pos, &surround, false))
+                .or_else(|| find(&below, &surround, false))
+                .or_else(|| find(pos, &above, false));
+        }
+        let offsets: Vec<(i32, i32)> = surround.into_iter().chain(above).collect();
+        find(pos, &offsets, true).or_else(|| find(pos, &offsets, false))
+    }
+}
+
+/// Vanilla `Direction.isFacingAngle`.
+fn is_facing_angle(direction: HorizontalFacing, yaw: f32) -> bool {
+    let radians = yaw.to_radians();
+    let step = direction.to_offset();
+    let facing_x = -pumpkin_util::math::sin(radians);
+    let facing_z = pumpkin_util::math::cos(radians);
+    (step.x as f32).mul_add(facing_x, step.z as f32 * facing_z) > 0.0
+}
+
+fn bed_surround_stand_up_offsets(
+    forward: HorizontalFacing,
+    side: HorizontalFacing,
+) -> [(i32, i32); 10] {
+    let f = forward.to_offset();
+    let s = side.to_offset();
+    [
+        (s.x, s.z),
+        (s.x - f.x, s.z - f.z),
+        (s.x - f.x * 2, s.z - f.z * 2),
+        (-f.x * 2, -f.z * 2),
+        (-s.x - f.x * 2, -s.z - f.z * 2),
+        (-s.x - f.x, -s.z - f.z),
+        (-s.x, -s.z),
+        (-s.x + f.x, -s.z + f.z),
+        (f.x, f.z),
+        (s.x + f.x, s.z + f.z),
+    ]
+}
+
+fn bed_above_stand_up_offsets(forward: HorizontalFacing) -> [(i32, i32); 2] {
+    let f = forward.to_offset();
+    [(0, 0), (-f.x, -f.z)]
 }
 
 fn entity_prevents_sleep(entity: &Entity) -> bool {
