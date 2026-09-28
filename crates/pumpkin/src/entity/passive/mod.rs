@@ -1,6 +1,7 @@
 pub mod allay;
 pub mod animal;
 pub mod armadillo;
+pub mod armadillo_ai;
 pub mod axolotl;
 pub mod axolotl_ai;
 pub mod bee;

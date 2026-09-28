@@ -5,7 +5,7 @@ use pumpkin_util::math::position::BlockPos;
 use rand::{Rng, RngExt};
 
 use crate::entity::ai::target_predicate::TargetPredicate;
-use crate::entity::passive::frog_ai;
+use crate::entity::passive::{armadillo_ai, frog_ai};
 use crate::entity::{Entity, EntityBase};
 use crate::world::World;
 
@@ -20,6 +20,7 @@ pub mod golem;
 pub mod hoglin_specific;
 pub mod hurt_by;
 pub mod is_in_water;
+pub mod mob_sensor;
 pub mod nearest_items;
 pub mod nearest_living_entities;
 pub mod nearest_players;
@@ -35,6 +36,7 @@ pub use golem::{GOLEM_SCAN_RATE, GolemSensor};
 pub use hoglin_specific::HoglinSpecificSensor;
 pub use hurt_by::HurtBySensor;
 pub use is_in_water::IsInWaterSensor;
+pub use mob_sensor::MobSensor;
 pub use nearest_items::NearestItemSensor;
 pub use nearest_living_entities::NearestLivingEntitySensor;
 pub use nearest_players::PlayerSensor;
@@ -43,6 +45,11 @@ pub use piglin_specific::PiglinSpecificSensor;
 pub use tempting::TemptingSensor;
 
 pub const DEFAULT_SCAN_RATE: i32 = 20;
+
+const ARMADILLO_SCARE_REQUIRES: &[MemoryModuleId] = &[
+    types::NEAREST_LIVING_ENTITIES.id(),
+    types::DANGER_DETECTED_RECENTLY.id(),
+];
 
 pub trait Sensor: Send + Sync {
     fn requires(&self) -> &'static [MemoryModuleId];
@@ -67,6 +74,7 @@ pub enum SensorType {
     FrogTemptations,
     FrogAttackables,
     AxolotlAttackables,
+    ArmadilloScareDetected,
 }
 
 impl SensorType {
@@ -89,6 +97,7 @@ impl SensorType {
             Self::FrogTemptations => "minecraft:frog_temptations",
             Self::FrogAttackables => "minecraft:frog_attackables",
             Self::AxolotlAttackables => "minecraft:axolotl_attackables",
+            Self::ArmadilloScareDetected => "minecraft:armadillo_scare_detected",
         }
     }
 
@@ -111,6 +120,7 @@ impl SensorType {
             | Self::FrogAttackables
             | Self::AxolotlAttackables => DEFAULT_SCAN_RATE,
             Self::GolemDetected => GOLEM_SCAN_RATE,
+            Self::ArmadilloScareDetected => armadillo_ai::SCARE_SCAN_RATE,
         }
     }
 
@@ -132,6 +142,13 @@ impl SensorType {
             Self::FrogTemptations => Box::new(TemptingSensor::new(frog_ai::is_temptation)),
             Self::FrogAttackables => Box::new(FrogAttackablesSensor),
             Self::AxolotlAttackables => Box::new(AxolotlAttackablesSensor),
+            Self::ArmadilloScareDetected => Box::new(MobSensor::new(
+                ARMADILLO_SCARE_REQUIRES,
+                armadillo_ai::is_scared_by,
+                armadillo_ai::can_stay_rolled_up,
+                types::DANGER_DETECTED_RECENTLY,
+                armadillo_ai::SCARE_MEMORY_TIME_TO_LIVE,
+            )),
         }
     }
 
