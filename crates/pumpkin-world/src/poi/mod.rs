@@ -132,6 +132,24 @@ impl PoiRegion {
         self.entries.values().collect()
     }
 
+    fn entries_in_chunk(&self, chunk_x: i32, chunk_z: i32) -> Vec<PoiEntry> {
+        self.entries
+            .values()
+            .filter(|entry| entry.x >> 4 == chunk_x && entry.z >> 4 == chunk_z)
+            .cloned()
+            .collect()
+    }
+
+    fn set_free_tickets(&mut self, pos: &BlockPos, free_tickets: i32) {
+        if let Some(entry) = self.entries.get_mut(&Self::pos_key(pos))
+            && entry.free_tickets != free_tickets
+        {
+            entry.free_tickets = free_tickets;
+            self.dirty_chunks.insert((pos.0.x >> 4, pos.0.z >> 4));
+            self.dirty = true;
+        }
+    }
+
     #[must_use]
     pub const fn is_dirty(&self) -> bool {
         self.dirty
@@ -348,6 +366,17 @@ impl PoiRegion {
         Ok(())
     }
 
+    /// Loads a region, or starts an empty one if the file is missing or unreadable.
+    #[must_use]
+    pub fn load_or_empty(path: &Path) -> Self {
+        Self::load(path).unwrap_or_else(|e| {
+            if path.exists() {
+                warn!("Failed to load POI region {}: {}", path.display(), e);
+            }
+            Self::new()
+        })
+    }
+
     pub fn load(path: &Path) -> std::io::Result<Self> {
         if !path.exists() {
             return Ok(Self::new());
@@ -453,14 +482,31 @@ impl PoiStorage {
 
     fn get_or_load_region(&mut self, rx: i32, rz: i32) -> &mut PoiRegion {
         let path = self.region_path(rx, rz);
-        self.regions.entry((rx, rz)).or_insert_with(|| {
-            PoiRegion::load(&path).unwrap_or_else(|e| {
-                if path.exists() {
-                    warn!("Failed to load POI region {}: {}", path.display(), e);
-                }
-                PoiRegion::new()
-            })
-        })
+        self.regions
+            .entry((rx, rz))
+            .or_insert_with(|| PoiRegion::load_or_empty(&path))
+    }
+
+    /// The region holding a chunk.
+    #[must_use]
+    pub const fn chunk_region(chunk_x: i32, chunk_z: i32) -> (i32, i32) {
+        (chunk_x >> 5, chunk_z >> 5)
+    }
+
+    #[must_use]
+    pub fn is_region_loaded(&self, region: (i32, i32)) -> bool {
+        self.regions.contains_key(&region)
+    }
+
+    /// The file a region is stored in, for reading it off the tick thread.
+    #[must_use]
+    pub fn region_file(&self, region: (i32, i32)) -> PathBuf {
+        self.region_path(region.0, region.1)
+    }
+
+    /// Adds a region read off the tick thread, unless it was loaded here in the meantime.
+    pub fn insert_region(&mut self, region: (i32, i32), loaded: PoiRegion) {
+        self.regions.entry(region).or_insert(loaded);
     }
 
     pub fn add(&mut self, pos: BlockPos, poi_type: &str) {
@@ -477,6 +523,19 @@ impl PoiStorage {
             poi_type: poi_type.to_string(),
             free_tickets,
         });
+    }
+
+    /// Every stored POI in the given chunk.
+    pub fn chunk_entries(&mut self, chunk_x: i32, chunk_z: i32) -> Vec<PoiEntry> {
+        self.get_or_load_region(chunk_x >> 5, chunk_z >> 5)
+            .entries_in_chunk(chunk_x, chunk_z)
+    }
+
+    /// Updates the stored free ticket count of the POI at `pos`, if there is one.
+    pub fn set_free_tickets(&mut self, pos: &BlockPos, free_tickets: i32) {
+        let (rx, rz) = Self::region_coords(pos);
+        self.get_or_load_region(rx, rz)
+            .set_free_tickets(pos, free_tickets);
     }
 
     pub fn add_portal(&mut self, pos: BlockPos) {
