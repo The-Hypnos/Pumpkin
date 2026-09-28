@@ -44,6 +44,7 @@ pub mod stop_being_angry_if_target_dead;
 pub mod stroll_to_poi;
 pub mod swim;
 pub mod timed;
+pub mod transport_items_between_containers;
 pub mod try_find_land;
 pub mod try_lay_spawn_on_fluid_near_land;
 pub mod utils;

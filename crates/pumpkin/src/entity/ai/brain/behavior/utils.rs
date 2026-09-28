@@ -71,6 +71,11 @@ pub fn look_at_entity(brain: &mut Brain, target: Arc<dyn EntityBase>) {
     );
 }
 
+/// The velocity vanilla's three-argument `BehaviorUtils.throwItem` uses.
+pub const DEFAULT_THROW_VELOCITY: Vector3<f64> = Vector3::new(0.3, 0.3, 0.3);
+/// The hand height below the eyes vanilla's three-argument `BehaviorUtils.throwItem` uses.
+pub const DEFAULT_THROW_HAND_Y_DISTANCE: f32 = 0.3;
+
 /// Vanilla `BehaviorUtils.throwItem`: tosses `item` from hand height toward `target`.
 pub fn throw_item(
     thrower: &dyn EntityBase,

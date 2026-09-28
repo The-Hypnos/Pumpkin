@@ -1,22 +1,27 @@
 use std::sync::{
-    Arc, Weak,
+    Arc, Mutex,
     atomic::{AtomicI32, AtomicI64, Ordering},
 };
 
-use pumpkin_data::entity::EntityType;
+use pumpkin_data::damage::DamageType;
+use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_inventory::Inventory;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
+use rand::RngExt;
 
+use crate::entity::ai::brain::behavior::utils::{
+    DEFAULT_THROW_HAND_Y_DISTANCE, DEFAULT_THROW_VELOCITY, is_alive, throw_item,
+};
+use crate::entity::ai::brain::memory::{PackedMemories, types};
+use crate::entity::ai::brain::{Brain, BrainTick};
+use crate::entity::passive::copper_golem_ai;
 use crate::entity::{
     Entity, EntityBase,
-    ai::goal::{
-        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
-    },
     custom_sound::CustomSound,
     mob::{Mob, MobEntity},
     player::Player,
@@ -104,40 +109,82 @@ pub struct CopperGolemEntity {
     pub weather_state: AtomicI32,
     pub state: AtomicI32,
     pub next_weathering_tick: AtomicI64,
+    /// The chest this golem holds open, vanilla's `openedChestPos` plus the opener count it adds.
+    opened_chest: Mutex<Option<Arc<dyn Inventory>>>,
 }
 
 impl CopperGolemEntity {
+    const REQUIRED_PATH_LENGTH: f32 = 48.0;
+
     pub fn new(entity: Entity) -> Arc<Self> {
-        let mob_entity = MobEntity::new(entity);
-        let golem = Self {
-            mob_entity,
+        let golem = Arc::new(Self {
+            mob_entity: MobEntity::new(entity),
             weather_state: AtomicI32::new(WeatherState::Unaffected.id()),
             state: AtomicI32::new(CopperGolemState::Idle.id()),
             next_weathering_tick: AtomicI64::new(-1),
-        };
-        let mob_arc = Arc::new(golem);
-        let mob_weak: Weak<dyn Mob> = {
-            let mob_arc: Arc<dyn Mob> = mob_arc.clone();
-            Arc::downgrade(&mob_arc)
-        };
+            opened_chest: Mutex::new(None),
+        });
+        let mut navigator = golem
+            .mob_entity
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        navigator.set_required_path_length(Self::REQUIRED_PATH_LENGTH);
+        navigator.set_can_open_doors(true);
+        drop(navigator);
+        golem.mob_entity.init_brain(golem.as_ref());
+        golem.mob_entity.with_brain(golem.as_ref(), |tick| {
+            let cooldown = tick.mob.get_random().random_range(60..100);
+            tick.brain
+                .set(types::TRANSPORT_ITEMS_COOLDOWN_TICKS, cooldown);
+        });
+        golem
+    }
 
+    /// Vanilla `container.startOpen(golem)` plus `setOpenedChestPos`.
+    pub fn open_chest(&self, container: &Arc<dyn Inventory>) {
+        let mut opened = self
+            .opened_chest
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(previous) = opened.take() {
+            previous.on_close();
+        }
+        container.on_open();
+        *opened = Some(Arc::clone(container));
+    }
+
+    /// Vanilla `container.stopOpen(golem)` plus `clearOpenedChestPos`. Vanilla's opener recheck
+    /// closes a chest the golem walked away from; here it happens directly.
+    pub fn close_chest(&self) {
+        if let Some(container) = self
+            .opened_chest
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
         {
-            let mut goal_selector = mob_arc
-                .mob_entity
-                .goals_selector
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            container.on_close();
+        }
+    }
 
-            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
-            goal_selector.add_goal(1, Box::new(WanderAroundGoal::new(1.0)));
-            goal_selector.add_goal(
-                2,
-                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
-            );
-            goal_selector.add_goal(3, Box::new(RandomLookAroundGoal::default()));
-        };
+    pub fn play_sound(&self, sound: Sound) {
+        let entity = self.get_entity();
+        entity.world.load().play_sound_fine(
+            sound,
+            SoundCategory::Neutral,
+            &entity.pos.load(),
+            1.0,
+            1.0,
+        );
+    }
 
-        mob_arc
+    fn main_hand_item(&self) -> ItemStack {
+        self.mob_entity
+            .living_entity
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&EquipmentSlot::MAIN_HAND)
     }
 
     #[must_use]
@@ -222,6 +269,30 @@ impl Mob for CopperGolemEntity {
         &self.mob_entity
     }
 
+    fn make_brain(&self, packed: &PackedMemories) -> Brain {
+        copper_golem_ai::COPPER_GOLEM_PROVIDER.make_brain(self, packed)
+    }
+
+    fn after_brain_tick(&self, tick: &mut BrainTick<'_>) {
+        copper_golem_ai::update_activity(tick);
+    }
+
+    fn custom_server_ai_step(&self, _caller: &dyn EntityBase) {
+        if !is_alive(self) {
+            self.mob_entity.apply_brain_inbox(self);
+            return;
+        }
+        self.mob_entity.tick_brain(self);
+    }
+
+    /// Vanilla `CopperGolem.actuallyHurt`.
+    fn on_damage(&self, _damage_type: DamageType, _source: Option<&dyn EntityBase>) {
+        self.set_state(CopperGolemState::Idle);
+        if self.mob_entity.living_entity.dead.load(Ordering::Relaxed) {
+            self.close_chest();
+        }
+    }
+
     fn mob_on_lightning_strike(
         &self,
         caller: &dyn EntityBase,
@@ -245,9 +316,25 @@ impl Mob for CopperGolemEntity {
         );
     }
 
-    fn mob_interact(&self, _player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         let entity = self.get_entity();
         let world = entity.world.load();
+
+        if item_stack.is_empty() {
+            let held = self.main_hand_item();
+            if !held.is_empty() {
+                throw_item(
+                    self,
+                    held,
+                    player.get_entity().pos.load(),
+                    DEFAULT_THROW_VELOCITY,
+                    DEFAULT_THROW_HAND_Y_DISTANCE,
+                );
+                self.mob_entity
+                    .set_item_slot(&EquipmentSlot::MAIN_HAND, ItemStack::EMPTY.clone());
+                return true;
+            }
+        }
 
         // Honeycomb waxing
         if item_stack.item.id == Item::HONEYCOMB.id
