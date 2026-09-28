@@ -181,6 +181,10 @@ impl<'a> EnvironmentAttributes<'a> {
     /// Evaluates the current villager `Activity` from the villager schedule timeline.
     #[must_use]
     pub fn get_dimension_value_activity(&self, baby: bool) -> Activity {
+        // The villager schedule timeline only runs in overworld-like dimensions.
+        if !self.world.dimension.has_skylight || self.world.dimension.has_fixed_time {
+            return Activity::Idle;
+        }
         if baby {
             sample_activity_track(
                 VillagerScheduleTimeline::BABY_VILLAGER_ACTIVITY_KEYFRAMES,

@@ -76,6 +76,7 @@ pub mod boss;
 pub mod breath;
 pub mod custom_sound;
 pub mod decoration;
+pub mod dismount_helper;
 pub mod effect;
 pub mod experience_orb;
 pub mod falling;

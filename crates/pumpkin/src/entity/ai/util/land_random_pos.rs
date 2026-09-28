@@ -11,6 +11,20 @@ use crate::world::World;
 /// Like [`super::default_random_pos::get_pos`], but pushed out of solids and off water.
 #[must_use]
 pub fn get_pos(mob: &dyn Mob, horizontal_dist: i32, vertical_dist: i32) -> Option<Vector3<f64>> {
+    get_pos_weighted(mob, horizontal_dist, vertical_dist, |pos| {
+        f64::from(mob.get_walk_target_value(pos))
+    })
+}
+
+/// Vanilla `LandRandomPos.getPos` with its own `positionWeight` in place of the mob's walk
+/// target value.
+#[must_use]
+pub fn get_pos_weighted(
+    mob: &dyn Mob,
+    horizontal_dist: i32,
+    vertical_dist: i32,
+    position_weight: impl Fn(&BlockPos) -> f64,
+) -> Option<Vector3<f64>> {
     let restrict = goal_utils::mob_restricted(mob, f64::from(horizontal_dist));
     let world = mob.get_entity().world.load_full();
     let block_pos = mob.get_entity().block_pos.load();
@@ -34,7 +48,7 @@ pub fn get_pos(mob: &dyn Mob, horizontal_dist: i32, vertical_dist: i32) -> Optio
             )?;
             move_pos_up_out_of_solid(mob, &world, &mut context, pos)
         },
-        |pos| f64::from(mob.get_walk_target_value(pos)),
+        position_weight,
     )
 }
 

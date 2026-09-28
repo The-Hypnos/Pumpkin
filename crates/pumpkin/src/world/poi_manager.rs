@@ -292,8 +292,27 @@ pub struct PoiManager {
     loaded_regions: LoadedRegions,
 }
 
+/// How many sections' village distances are kept before the cache starts over.
+const VILLAGE_DISTANCE_CACHE_LIMIT: usize = 8192;
+
 fn section_of(pos: &BlockPos) -> (i32, i32, i32) {
     (pos.0.x >> 4, pos.0.y >> 4, pos.0.z >> 4)
+}
+
+/// Vanilla's `SectionTracker` level: sections to the nearest centre, stepping diagonally too,
+/// or `MAX_VILLAGE_DISTANCE + 1` past that.
+fn distance_to_nearest(centers: &[(i32, i32, i32)], section: (i32, i32, i32)) -> i32 {
+    centers
+        .iter()
+        .map(|center| {
+            (center.0 - section.0)
+                .abs()
+                .max((center.1 - section.1).abs())
+                .max((center.2 - section.2).abs())
+        })
+        .filter(|distance| *distance <= MAX_VILLAGE_DISTANCE)
+        .min()
+        .unwrap_or(NOT_A_VILLAGE)
 }
 
 fn dist_sqr(a: &BlockPos, b: &BlockPos) -> i64 {
@@ -546,29 +565,77 @@ impl PoiManager {
         {
             return cached.1;
         }
-        let mut level = NOT_A_VILLAGE;
-        {
-            let chunks = self.read_chunks();
-            let (sx, sy, sz) = section;
-            for chunk_z in sz - MAX_VILLAGE_DISTANCE..=sz + MAX_VILLAGE_DISTANCE {
-                for chunk_x in sx - MAX_VILLAGE_DISTANCE..=sx + MAX_VILLAGE_DISTANCE {
-                    let Some(records) = chunks.get(&Vector2::new(chunk_x, chunk_z)) else {
-                        continue;
-                    };
-                    for record in records {
-                        if !record.poi_type.is_village() || !record.is_occupied() {
-                            continue;
-                        }
-                        let (rx, ry, rz) = section_of(&record.pos);
-                        let distance = (rx - sx).abs().max((ry - sy).abs()).max((rz - sz).abs());
-                        level = level.min(distance);
-                    }
-                }
-            }
+        let centers = self.village_centers_near(section, MAX_VILLAGE_DISTANCE);
+        let level = distance_to_nearest(&centers, section);
+        // Every section a villager ever asked about would otherwise stay for the server's
+        // uptime. Entries are cheap to recompute, so start over once there are too many.
+        if self.village_distance_cache.len() >= VILLAGE_DISTANCE_CACHE_LIMIT {
+            self.village_distance_cache.clear();
         }
         self.village_distance_cache
             .insert(section, (generation, level));
         level
+    }
+
+    /// Vanilla `PoiManager.isVillageCenter` for every section within `range` sections
+    /// horizontally of `section`: those holding a claimed village POI.
+    fn village_centers_near(&self, section: (i32, i32, i32), range: i32) -> Vec<(i32, i32, i32)> {
+        let chunks = self.read_chunks();
+        let mut centers = Vec::new();
+        for chunk_z in section.2 - range..=section.2 + range {
+            for chunk_x in section.0 - range..=section.0 + range {
+                let Some(records) = chunks.get(&Vector2::new(chunk_x, chunk_z)) else {
+                    continue;
+                };
+                centers.extend(
+                    records
+                        .iter()
+                        .filter(|record| record.poi_type.is_village() && record.is_occupied())
+                        .map(|record| section_of(&record.pos)),
+                );
+            }
+        }
+        centers
+    }
+
+    /// Vanilla `ServerLevel.isCloseToVillage`.
+    #[must_use]
+    pub fn is_close_to_village(&self, pos: &BlockPos, section_distance: i32) -> bool {
+        section_distance <= MAX_VILLAGE_DISTANCE
+            && self.sections_to_village(section_of(pos)) <= section_distance
+    }
+
+    /// Vanilla `ServerLevel.isVillage`.
+    #[must_use]
+    pub fn is_village(&self, pos: &BlockPos) -> bool {
+        self.is_close_to_village(pos, 1)
+    }
+
+    /// Vanilla `BehaviorUtils.findSectionClosestToVillage`: the section within `radius` of
+    /// `center` nearest a village, or `center` when none is nearer.
+    #[must_use]
+    pub fn find_section_closest_to_village(
+        &self,
+        center: (i32, i32, i32),
+        radius: i32,
+    ) -> (i32, i32, i32) {
+        let center_distance = self.sections_to_village(center);
+        let centers = self.village_centers_near(center, radius + MAX_VILLAGE_DISTANCE);
+        let mut best = center;
+        let mut best_distance = center_distance;
+        // `SectionPos.cube` order: x fastest, then y, then z.
+        for z in center.2 - radius..=center.2 + radius {
+            for y in center.1 - radius..=center.1 + radius {
+                for x in center.0 - radius..=center.0 + radius {
+                    let distance = distance_to_nearest(&centers, (x, y, z));
+                    if distance < best_distance {
+                        best = (x, y, z);
+                        best_distance = distance;
+                    }
+                }
+            }
+        }
+        best
     }
 
     /// Indexes a chunk that just loaded: the POIs its blocks hold, with the ticket counts saved
