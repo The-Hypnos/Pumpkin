@@ -69,6 +69,7 @@ pub mod shulker;
 pub mod silverfish;
 pub mod skeleton;
 pub mod slime;
+pub mod sounds;
 pub mod spawn;
 pub mod spider;
 pub mod sun_burn;
