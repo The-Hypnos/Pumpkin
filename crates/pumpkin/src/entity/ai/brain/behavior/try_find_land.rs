@@ -16,6 +16,9 @@ use super::one_shot::OneShot;
 
 const TRY_FIND_LAND_COOLDOWN_TICKS: i64 = 60;
 const TRY_FIND_LAND_NEAR_LIQUID_COOLDOWN_TICKS: i64 = 40;
+const TRY_FIND_LIQUID_RETRY_TICKS: i64 = 22;
+const TRY_FIND_LIQUID_COOLDOWN_TICKS: i64 = 40;
+const TOO_CLOSE_TO_LIQUID: f64 = 1.5;
 
 fn has_fluid(state_id: BlockStateId) -> bool {
     state_id.to_state().is_waterlogged()
@@ -129,6 +132,55 @@ pub fn try_find_land_near_liquid(
             walk_and_look_to(tick, target, speed_modifier, 0);
         }
         next_ok_start_time = tick.time + TRY_FIND_LAND_NEAR_LIQUID_COOLDOWN_TICKS;
+        true
+    })
+}
+
+/// Vanilla `TryFindLiquid`: from land, walk to the nearest `fluid_tag` source with air above,
+/// or failing that the nearest one not right underfoot.
+#[must_use]
+pub fn try_find_liquid(range: i32, speed_modifier: f32, fluid_tag: &'static Tag) -> OneShot {
+    let mut next_ok_start_time = 0i64;
+    OneShot::new("TryFindLiquid", conditions(), move |tick| {
+        let body_pos = tick.mob.get_entity().block_pos.load();
+        if state_at(tick.world, &body_pos).is_some_and(|state| fluid_has_tag(state, fluid_tag)) {
+            return false;
+        }
+        if tick.time < next_ok_start_time {
+            next_ok_start_time = tick.time + TRY_FIND_LIQUID_RETRY_TICKS;
+            return true;
+        }
+        let world = Arc::clone(tick.world);
+        let position = tick.mob.get_entity().pos.load();
+        let mut found: Option<BlockPos> = None;
+        find_first_in_box_by_manhattan_distance(body_pos, range, range, |pos| {
+            if pos.0.x == body_pos.0.x && pos.0.z == body_pos.0.z {
+                return false;
+            }
+            let Some(state_id) = state_at(&world, pos) else {
+                return false;
+            };
+            let block = pumpkin_data::Block::from_state_id(state_id);
+            let is_liquid_block = block.id == pumpkin_data::Block::WATER.id
+                || block.id == pumpkin_data::Block::LAVA.id;
+            if !is_liquid_block || !fluid_has_tag(state_id, fluid_tag) {
+                return false;
+            }
+            if world.get_block_state(&pos.up()).is_air() {
+                found = Some(*pos);
+                return true;
+            }
+            let too_close = pos.to_centered_f64().squared_distance_to_vec(&position)
+                < TOO_CLOSE_TO_LIQUID * TOO_CLOSE_TO_LIQUID;
+            if found.is_none() && !too_close {
+                found = Some(*pos);
+            }
+            false
+        });
+        if let Some(target) = found {
+            walk_and_look_to(tick, target, speed_modifier, 0);
+        }
+        next_ok_start_time = tick.time + TRY_FIND_LIQUID_COOLDOWN_TICKS;
         true
     })
 }
