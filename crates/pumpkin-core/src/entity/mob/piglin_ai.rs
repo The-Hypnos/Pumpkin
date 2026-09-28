@@ -155,8 +155,7 @@ pub fn is_adult_piglin(entity: &dyn EntityBase) -> bool {
 
 #[must_use]
 pub fn is_baby_hoglin(entity: &dyn EntityBase) -> bool {
-    as_hoglin(entity)
-        .is_some_and(|hoglin| hoglin.is_baby.load(std::sync::atomic::Ordering::Relaxed))
+    as_hoglin(entity).is_some_and(|hoglin| !hoglin.is_adult())
 }
 
 #[must_use]
