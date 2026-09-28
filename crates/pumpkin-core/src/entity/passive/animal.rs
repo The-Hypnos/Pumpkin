@@ -8,6 +8,7 @@ use pumpkin_data::entity::EntityStatus;
 use rand::RngExt;
 use uuid::Uuid;
 
+use crate::entity::ai::brain::BrainTick;
 use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::entity::{EntityBase, mob::Mob, player::Player, r#type::from_type};
 use pumpkin_protocol::bedrock::server::actor_event::ActorEventID;
@@ -15,6 +16,12 @@ use pumpkin_util::math::vector3::Vector3;
 
 pub trait Animal: Mob {
     fn is_food(&self, item_stack: &ItemStack) -> bool;
+
+    /// Vanilla `Animal.spawnChildFromBreeding` as the brain's `AnimalMakeLove` calls it, from
+    /// inside the brain tick so an override can write its own memories.
+    fn spawn_child_from_breeding(&self, tick: &mut BrainTick<'_>, mate: &dyn EntityBase) {
+        spawn_child_from_breeding(tick.mob, mate);
+    }
 
     /// Animals prefer grass, then bright spots.
     fn animal_walk_target_value(&self, pos: &pumpkin_util::math::position::BlockPos) -> f32 {
@@ -120,6 +127,21 @@ pub trait Animal: Mob {
 
 /// Vanilla `Animal.spawnChildFromBreeding`, shared by `BreedGoal` and the brain's `AnimalMakeLove`.
 pub fn spawn_child_from_breeding(mob: &dyn Mob, mate: &dyn EntityBase) {
+    let entity = mob.get_entity();
+    let baby = from_type(
+        entity.entity_type,
+        entity.pos.load(),
+        &entity.world.load(),
+        Uuid::new_v4(),
+    );
+    baby.get_entity().set_age(-24000);
+    finalize_spawn_child_from_breeding(mob, mate);
+    entity.world.load_full().spawn_entity(baby);
+}
+
+/// Vanilla `Animal.finalizeSpawnChildFromBreeding`: stats, love and cooldown resets, hearts
+/// and experience, without the offspring.
+pub fn finalize_spawn_child_from_breeding(mob: &dyn Mob, mate: &dyn EntityBase) {
     let mob_entity = mob.get_mob_entity();
     let entity = mob.get_entity();
     let world = entity.world.load();
@@ -155,11 +177,7 @@ pub fn spawn_child_from_breeding(mob: &dyn Mob, mate: &dyn EntityBase) {
     mate.set_breeding_cooldown(6000);
 
     let parent_pos = entity.pos.load();
-    let baby = from_type(entity.entity_type, parent_pos, &world, Uuid::new_v4());
-    baby.get_entity().set_age(-24000);
     let world_full = entity.world.load_full();
-    world_full.spawn_entity(baby);
-
     world_full.send_entity_status(entity, EntityStatus::InLoveHearts, None);
     // TODO: gate on the `animalBreedingDropsXp` game rule once it exists.
     ExperienceOrbEntity::spawn(&world_full, parent_pos, mob.get_random().random_range(1..8));

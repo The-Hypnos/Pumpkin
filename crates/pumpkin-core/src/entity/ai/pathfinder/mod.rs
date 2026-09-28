@@ -396,6 +396,15 @@ pub trait PathNavigationTrait: Send + Sync {
         destination: Vector3<f64>,
         reach_range: i32,
     ) -> Option<Path>;
+    /// Vanilla `PathNavigation.createPath(BlockPos, int, int)`: no surface adjustment, and the
+    /// search stops expanding past `max_path_length`.
+    fn create_path_within(
+        &mut self,
+        entity: &LivingEntity,
+        pos: BlockPos,
+        reach_range: i32,
+        max_path_length: f32,
+    ) -> Option<Path>;
     fn recompute_path(&mut self, entity: &LivingEntity);
     fn set_avoid_sun(&mut self, avoid_sun: bool);
     fn set_can_walk_over_fences(&mut self, can_walk: bool);
@@ -620,6 +629,19 @@ impl PathNavigation {
         destination: Vector3<f64>,
         reach_range: i32,
     ) -> Option<Path> {
+        let max_path_length = self.mob_max_follow_range(entity);
+        self.compute_path_within(entity, destination, reach_range, max_path_length)
+    }
+
+    /// Vanilla `Pathfinder.findPath` with an explicit `maxPathLength`: nodes farther than that
+    /// from the start are not expanded.
+    pub fn compute_path_within(
+        &mut self,
+        entity: &LivingEntity,
+        destination: Vector3<f64>,
+        reach_range: i32,
+        max_path_length: f32,
+    ) -> Option<Path> {
         let start_pos_f = entity.entity.pos.load();
         let start_block_vec = BlockPos::floored_v(start_pos_f).0;
         let mob_position = Vector3::new(start_block_vec.x, start_block_vec.y, start_block_vec.z);
@@ -693,8 +715,7 @@ impl PathNavigation {
             let dy = (current.pos.0.y - start_pos.y) as f32;
             let dz = (current.pos.0.z - start_pos.z) as f32;
             let euclidean = (dx * dx + dy * dy + dz * dz).sqrt();
-            let follow_range = self.mob_max_follow_range(entity);
-            if euclidean >= follow_range {
+            if euclidean >= max_path_length {
                 closed_set.insert(current.pos.0, current);
                 continue;
             }
@@ -709,7 +730,7 @@ impl PathNavigation {
                 let tentative_g = current.g + step_cost + neighbor.cost_malus;
 
                 let in_heap = self.open_set.contains(&neighbor);
-                if neighbor.walked_dist < follow_range
+                if neighbor.walked_dist < max_path_length
                     && (!in_heap
                         || self
                             .open_set
@@ -1348,6 +1369,17 @@ impl PathNavigationTrait for GroundPathNavigation {
         self.inner.compute_path(entity, dest_v, reach_range)
     }
 
+    fn create_path_within(
+        &mut self,
+        entity: &LivingEntity,
+        pos: BlockPos,
+        reach_range: i32,
+        max_path_length: f32,
+    ) -> Option<Path> {
+        self.inner
+            .compute_path_within(entity, pos.to_centered_f64(), reach_range, max_path_length)
+    }
+
     fn recompute_path(&mut self, entity: &LivingEntity) {
         let world_age = entity.entity.world.load().get_world_age() as u64;
         if world_age.saturating_sub(self.inner.time_last_recompute) <= 20 {
@@ -1633,6 +1665,17 @@ impl PathNavigationTrait for FlyingPathNavigation {
         reach_range: i32,
     ) -> Option<Path> {
         self.inner.compute_path(entity, destination, reach_range)
+    }
+
+    fn create_path_within(
+        &mut self,
+        entity: &LivingEntity,
+        pos: BlockPos,
+        reach_range: i32,
+        max_path_length: f32,
+    ) -> Option<Path> {
+        self.inner
+            .compute_path_within(entity, pos.to_centered_f64(), reach_range, max_path_length)
     }
 
     fn recompute_path(&mut self, entity: &LivingEntity) {
@@ -1926,6 +1969,17 @@ impl PathNavigationTrait for WaterBoundPathNavigation {
         self.inner.compute_path(entity, destination, reach_range)
     }
 
+    fn create_path_within(
+        &mut self,
+        entity: &LivingEntity,
+        pos: BlockPos,
+        reach_range: i32,
+        max_path_length: f32,
+    ) -> Option<Path> {
+        self.inner
+            .compute_path_within(entity, pos.to_centered_f64(), reach_range, max_path_length)
+    }
+
     fn recompute_path(&mut self, entity: &LivingEntity) {
         let world_age = entity.entity.world.load().get_world_age() as u64;
         if world_age.saturating_sub(self.inner.time_last_recompute) <= 20 {
@@ -2163,6 +2217,17 @@ impl PathNavigationTrait for WallClimberNavigation {
     ) -> Option<Path> {
         self.path_to_position = Some(BlockPos::floored_v(destination));
         self.inner.create_path(entity, destination, reach_range)
+    }
+
+    fn create_path_within(
+        &mut self,
+        entity: &LivingEntity,
+        pos: BlockPos,
+        reach_range: i32,
+        max_path_length: f32,
+    ) -> Option<Path> {
+        self.inner
+            .create_path_within(entity, pos, reach_range, max_path_length)
     }
 
     fn recompute_path(&mut self, entity: &LivingEntity) {
@@ -2442,6 +2507,17 @@ impl PathNavigationTrait for AmphibiousPathNavigation {
         reach_range: i32,
     ) -> Option<Path> {
         self.inner.compute_path(entity, destination, reach_range)
+    }
+
+    fn create_path_within(
+        &mut self,
+        entity: &LivingEntity,
+        pos: BlockPos,
+        reach_range: i32,
+        max_path_length: f32,
+    ) -> Option<Path> {
+        self.inner
+            .compute_path_within(entity, pos.to_centered_f64(), reach_range, max_path_length)
     }
 
     fn recompute_path(&mut self, entity: &LivingEntity) {

@@ -18,6 +18,7 @@ pub mod go_to_target_location;
 pub mod go_to_wanted_item;
 pub mod interact_with;
 pub mod interact_with_door;
+pub mod long_jump;
 pub mod look_at_target_sink;
 pub mod melee_attack;
 pub mod mount;
@@ -37,6 +38,8 @@ pub mod stop_attacking_if_target_invalid;
 pub mod stop_being_angry_if_target_dead;
 pub mod stroll_to_poi;
 pub mod timed;
+pub mod try_find_land;
+pub mod try_lay_spawn_on_fluid_near_land;
 pub mod utils;
 
 pub use animal_make_love::AnimalMakeLove;
@@ -56,6 +59,7 @@ pub use go_to_target_location::go_to_target_location;
 pub use go_to_wanted_item::go_to_wanted_item;
 pub use interact_with::interact_with;
 pub use interact_with_door::interact_with_door;
+pub use long_jump::{LongJumpMidJump, LongJumpToRandomPos, default_acceptable_landing_spot};
 pub use look_at_target_sink::LookAtTargetSink;
 pub use melee_attack::melee_attack;
 pub use mount::mount;
@@ -79,6 +83,8 @@ pub use stop_attacking_if_target_invalid::stop_attacking_if_target_invalid;
 pub use stop_being_angry_if_target_dead::stop_being_angry_if_target_dead;
 pub use stroll_to_poi::{stroll_around_poi, stroll_to_poi};
 pub use timed::{Behavior, DEFAULT_DURATION, NO_TIMEOUT, Timed};
+pub use try_find_land::{try_find_land, try_find_land_near_liquid};
+pub use try_lay_spawn_on_fluid_near_land::try_lay_spawn_on_fluid_near_land;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Status {
