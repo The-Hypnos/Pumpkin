@@ -1,5 +1,5 @@
 use std::sync::{
-    Arc, Weak,
+    Arc, OnceLock, Weak,
     atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
@@ -10,6 +10,10 @@ use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 
+use crate::entity::ai::brain::behavior::utils::is_alive;
+use crate::entity::ai::brain::memory::PackedMemories;
+use crate::entity::ai::brain::{Brain, BrainTick};
+use crate::entity::passive::happy_ghast_ai;
 use crate::entity::{
     Entity, EntityBase,
     ageable::{AgeableData, AgeableMob},
@@ -34,6 +38,9 @@ pub struct HappyGhastEntity {
     pub leash_holder_time: AtomicI32,
     pub is_leash_holder: AtomicBool,
     pub stays_still: AtomicBool,
+    /// Ghastlings run the brain and adults the goals; this tracks which set is live.
+    runs_brain: AtomicBool,
+    self_weak: OnceLock<Weak<dyn Mob>>,
 }
 
 impl HappyGhastEntity {
@@ -46,15 +53,44 @@ impl HappyGhastEntity {
             leash_holder_time: AtomicI32::new(0),
             is_leash_holder: AtomicBool::new(false),
             stays_still: AtomicBool::new(false),
+            runs_brain: AtomicBool::new(false),
+            self_weak: OnceLock::new(),
         };
         let mob_arc = Arc::new(happy_ghast);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
         };
+        let _ = mob_arc.self_weak.set(mob_weak);
+        mob_arc.register_adult_goals();
+        mob_arc.mob_entity.init_brain(mob_arc.as_ref());
+        mob_arc
+    }
 
+    /// Vanilla `HappyGhast.ageBoundaryReached`: ghastlings drop their goals for the brain,
+    /// adults get their goals back and stop the brain.
+    fn age_boundary_reached(&self, baby: bool) {
+        if baby {
+            self.mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+        } else {
+            self.register_adult_goals();
+            self.mob_entity.with_brain(self, |tick| {
+                tick.brain.stop_all(tick.world, tick.mob, tick.time);
+                tick.brain.clear_memories();
+            });
+        }
+    }
+
+    fn register_adult_goals(&self) {
+        let Some(mob_weak) = self.self_weak.get().cloned() else {
+            return;
+        };
         {
-            let mut goal_selector = mob_arc
+            let mut goal_selector = self
                 .mob_entity
                 .goals_selector
                 .lock()
@@ -77,8 +113,6 @@ impl HappyGhastEntity {
             );
             goal_selector.add_goal(4, Box::new(RandomLookAroundGoal::default()));
         };
-
-        mob_arc
     }
 
     pub fn set_server_still_timeout(&self, timeout: i32) {
@@ -154,8 +188,29 @@ impl Mob for HappyGhastEntity {
         &self.mob_entity
     }
 
+    fn make_brain(&self, packed: &PackedMemories) -> Brain {
+        happy_ghast_ai::HAPPY_GHAST_PROVIDER.make_brain(self, packed)
+    }
+
+    fn after_brain_tick(&self, tick: &mut BrainTick<'_>) {
+        happy_ghast_ai::update_activity(tick);
+    }
+
+    // Vanilla only ticks the brain of a ghastling.
+    fn custom_server_ai_step(&self, _caller: &dyn EntityBase) {
+        if !is_alive(self) || !self.is_baby() {
+            self.mob_entity.apply_brain_inbox(self);
+            return;
+        }
+        self.mob_entity.tick_brain(self);
+    }
+
     fn mob_tick(&self, _caller: &dyn EntityBase) {
         self.ageable_ai_step();
+        let baby = self.is_baby();
+        if self.runs_brain.swap(baby, Ordering::Relaxed) != baby {
+            self.age_boundary_reached(baby);
+        }
 
         let leash_time = self.leash_holder_time.load(Ordering::Relaxed);
         if leash_time > 0 {

@@ -2,10 +2,35 @@ use super::super::memory::walk_target::WalkTarget;
 use super::super::memory::{MemoryStatus, types};
 use super::one_shot::OneShot;
 use super::utils::get_random_swimmable_pos;
-use crate::entity::ai::util::land_random_pos;
+use crate::entity::ai::util::{air_and_water_random_pos, land_random_pos};
 
 const MAX_XZ_DIST: i32 = 10;
 const MAX_Y_DIST: i32 = 7;
+const FLY_HEIGHT: i32 = -2;
+
+/// Vanilla `RandomStroll.fly`: wanders through open air ahead of where the mob faces.
+#[must_use]
+pub fn fly(speed_modifier: f32) -> OneShot {
+    OneShot::new(
+        "RandomFly",
+        vec![(types::WALK_TARGET.id(), MemoryStatus::ValueAbsent)],
+        move |tick| {
+            let view = tick.mob.get_looking_vector();
+            let target = air_and_water_random_pos::get_pos(
+                tick.mob,
+                MAX_XZ_DIST,
+                MAX_Y_DIST,
+                FLY_HEIGHT,
+                view.x,
+                view.z,
+                std::f64::consts::FRAC_PI_2,
+            )
+            .map(|pos| WalkTarget::from_vec(pos, speed_modifier, 0));
+            tick.brain.set_optional(types::WALK_TARGET, target);
+            true
+        },
+    )
+}
 
 #[must_use]
 pub fn stroll(speed_modifier: f32, may_stroll_from_water: bool) -> OneShot {

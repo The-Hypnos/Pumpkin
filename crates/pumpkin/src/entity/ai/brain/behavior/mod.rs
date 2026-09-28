@@ -45,7 +45,7 @@ pub mod utils;
 
 pub use animal_make_love::AnimalMakeLove;
 pub use animal_panic::AnimalPanic;
-pub use baby_follow_adult::baby_follow_adult;
+pub use baby_follow_adult::{baby_follow, baby_follow_adult};
 pub use back_up_if_too_close::back_up_if_too_close;
 pub use become_passive_if_memory_present::become_passive_if_memory_present;
 pub use copy_memory_with_expiry::copy_memory_with_expiry;
@@ -66,7 +66,7 @@ pub use melee_attack::melee_attack;
 pub use mount::mount;
 pub use move_to_target_sink::MoveToTargetSink;
 pub use one_shot::{OneShot, Trigger};
-pub use random_stroll::{stroll, stroll_with_range, swim};
+pub use random_stroll::{fly, stroll, stroll_with_range, swim};
 pub use set_entity_look_target::{
     set_entity_look_target, set_entity_look_target_any, set_entity_look_target_of_type,
 };
