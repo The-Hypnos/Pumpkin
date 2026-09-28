@@ -5,7 +5,7 @@ use pumpkin_util::math::position::BlockPos;
 use rand::{Rng, RngExt};
 
 use crate::entity::ai::target_predicate::TargetPredicate;
-use crate::entity::passive::{armadillo_ai, frog_ai};
+use crate::entity::passive::{armadillo_ai, frog_ai, nautilus_ai};
 use crate::entity::{Entity, EntityBase};
 use crate::world::World;
 
@@ -75,6 +75,7 @@ pub enum SensorType {
     FrogAttackables,
     AxolotlAttackables,
     ArmadilloScareDetected,
+    NautilusTemptations,
 }
 
 impl SensorType {
@@ -98,6 +99,7 @@ impl SensorType {
             Self::FrogAttackables => "minecraft:frog_attackables",
             Self::AxolotlAttackables => "minecraft:axolotl_attackables",
             Self::ArmadilloScareDetected => "minecraft:armadillo_scare_detected",
+            Self::NautilusTemptations => "minecraft:nautilus_temptations",
         }
     }
 
@@ -118,7 +120,8 @@ impl SensorType {
             | Self::HoglinSpecific
             | Self::FrogTemptations
             | Self::FrogAttackables
-            | Self::AxolotlAttackables => DEFAULT_SCAN_RATE,
+            | Self::AxolotlAttackables
+            | Self::NautilusTemptations => DEFAULT_SCAN_RATE,
             Self::GolemDetected => GOLEM_SCAN_RATE,
             Self::ArmadilloScareDetected => armadillo_ai::SCARE_SCAN_RATE,
         }
@@ -149,6 +152,7 @@ impl SensorType {
                 types::DANGER_DETECTED_RECENTLY,
                 armadillo_ai::SCARE_MEMORY_TIME_TO_LIVE,
             )),
+            Self::NautilusTemptations => Box::new(TemptingSensor::new(nautilus_ai::is_temptation)),
         }
     }
 

@@ -16,6 +16,12 @@ use pumpkin_data::{
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::vector3::Vector3;
 
+use pumpkin_data::damage::DamageType;
+
+use crate::entity::ai::brain::behavior::utils::is_alive;
+use crate::entity::ai::brain::memory::PackedMemories;
+use crate::entity::ai::brain::{Brain, BrainTick};
+use crate::entity::passive::nautilus_ai;
 use crate::entity::{
     Entity, EntityBase,
     custom_sound::CustomSound,
@@ -47,7 +53,13 @@ impl NautilusEntity {
             inventory: Mutex::new(vec![ItemStack::new(0, &pumpkin_data::item::Item::AIR); 9]),
         };
 
-        Arc::new(nautilus)
+        let nautilus = Arc::new(nautilus);
+        nautilus.mob_entity.init_brain(nautilus.as_ref());
+        // Vanilla seeds this in `finalizeSpawn` and for bred offspring.
+        nautilus.mob_entity.with_brain(nautilus.as_ref(), |tick| {
+            nautilus_ai::init_memories(tick.brain, tick.mob);
+        });
+        nautilus
     }
 
     pub fn is_dashing(&self) -> bool {
@@ -238,6 +250,40 @@ impl Mob for NautilusEntity {
 
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn make_brain(&self, packed: &PackedMemories) -> Brain {
+        nautilus_ai::NAUTILUS_PROVIDER.make_brain(self, packed)
+    }
+
+    fn after_brain_tick(&self, tick: &mut BrainTick<'_>) {
+        nautilus_ai::update_activity(tick);
+    }
+
+    fn custom_server_ai_step(&self, _caller: &dyn EntityBase) {
+        if !is_alive(self) {
+            self.mob_entity.apply_brain_inbox(self);
+            return;
+        }
+        self.mob_entity.tick_brain(self);
+    }
+
+    /// Vanilla `AbstractNautilus.hurtServer`: angry at whoever hurt it.
+    fn on_damage(&self, _damage_type: DamageType, source: Option<&dyn EntityBase>) {
+        let Some(attacker) = source else {
+            return;
+        };
+        let world = self.mob_entity.living_entity.entity.world.load_full();
+        let Some(attacker) = world
+            .get_entity_by_id(attacker.get_entity().entity_id)
+            .filter(|attacker| attacker.get_living_entity().is_some())
+        else {
+            return;
+        };
+        // Queued: taking the victim's brain here deadlocks two mobs fighting
+        self.mob_entity.post_to_brain(Box::new(move |tick| {
+            nautilus_ai::set_anger_target(tick, &attacker);
+        }));
     }
 
     fn mob_init_data_tracker(&self) {
