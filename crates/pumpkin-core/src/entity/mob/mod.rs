@@ -38,6 +38,7 @@ pub mod abstract_piglin;
 pub mod bat;
 pub mod blaze;
 pub mod breeze;
+pub mod breeze_ai;
 pub mod cave_spider;
 pub mod creaking;
 pub mod creaking_ai;

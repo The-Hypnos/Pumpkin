@@ -423,7 +423,7 @@ pub fn default_acceptable_landing_spot(mob: &dyn Mob, target_pos: &BlockPos) -> 
 }
 
 /// Vanilla `LongJumpUtil.calculateJumpVectorForAngle`.
-fn calculate_jump_vector_for_angle(
+pub fn calculate_jump_vector_for_angle(
     mob: &dyn Mob,
     target_pos: Vector3<f64>,
     max_jump_velocity: f32,
