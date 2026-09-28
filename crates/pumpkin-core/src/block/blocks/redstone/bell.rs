@@ -7,6 +7,7 @@ use crate::block::{
     BlockBehaviour, BlockHitResult, BrokenArgs, CanPlaceAtArgs, NormalUseArgs,
     OnNeighborUpdateArgs, OnPlaceArgs, OnProjectileHitArgs, PathComputationType, PlacedArgs,
 };
+use crate::entity::ai::brain::memory::types;
 use crate::world::World;
 use pumpkin_data::block_properties::HorizontalFacing;
 use pumpkin_data::block_properties::{AttachFace, BellAttachment, BellLikeProperties};
@@ -16,10 +17,12 @@ use pumpkin_data::tag::Taggable;
 use pumpkin_data::{Block, BlockDirection, BlockState, BlockStateId};
 use pumpkin_data::{HorizontalFacingExt, tag};
 use pumpkin_macros::pumpkin_block;
+use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
 
-fn ring_bell(
+/// Vanilla `BellBlock.attemptToRing`.
+pub fn ring_bell(
     position: BlockPos,
     world: &Arc<World>,
     hit_direction: Option<HorizontalFacing>,
@@ -48,6 +51,7 @@ fn ring_bell(
         && let Some(be) = block_entity.as_any().downcast_ref::<BellBlockEntity>()
     {
         be.activate(direction);
+        hear_bell(world, &position);
     }
 
     world.play_sound_fine(
@@ -60,6 +64,30 @@ fn ring_bell(
 
     //TODO Emit game event: BLOCK_CHANGE -> Send block update Packet
     true
+}
+
+/// Vanilla `BellBlockEntity.updateEntities`: everything within earshot remembers the ring.
+fn hear_bell(world: &World, position: &BlockPos) {
+    const SEARCH_RADIUS: f64 = 48.0;
+    const HEARING_RANGE: f64 = 32.0;
+    let center = position.to_centered_f64();
+    let search =
+        BoundingBox::from_block(position).expand(SEARCH_RADIUS, SEARCH_RADIUS, SEARCH_RADIUS);
+    world.entity_grid.load().for_each_in_box(&search, |entity| {
+        if entity.get_entity().is_alive()
+            && entity
+                .get_entity()
+                .pos
+                .load()
+                .squared_distance_to_vec(&center)
+                < HEARING_RANGE * HEARING_RANGE
+            && let Some(mob) = entity.as_mob_entity()
+        {
+            mob.post_to_brain(Box::new(|tick| {
+                tick.brain.set(types::HEARD_BELL_TIME, tick.time);
+            }));
+        }
+    });
 }
 
 fn is_point_on_bell(
