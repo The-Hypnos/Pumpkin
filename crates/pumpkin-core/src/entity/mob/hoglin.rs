@@ -377,21 +377,3 @@ impl Mob for HoglinEntity {
         }
     }
 }
-
-/// Vanilla `HoglinBase.throwTarget`, shared with zoglins.
-pub fn throw_target(attacker: &Entity, target: &dyn EntityBase) {
-    let my_pos = attacker.pos.load();
-    let target_pos = target.get_entity().pos.load();
-    let dx = target_pos.x - my_pos.x;
-    let dz = target_pos.z - my_pos.z;
-    let dist = dx.hypot(dz).max(0.001);
-    let vel = target.get_entity().velocity.load();
-    target
-        .get_entity()
-        .velocity
-        .store(pumpkin_util::math::vector3::Vector3::new(
-            vel.x + (dx / dist) * 0.5,
-            0.5,
-            vel.z + (dz / dist) * 0.5,
-        ));
-}
