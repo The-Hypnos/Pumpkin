@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use pumpkin_data::Block;
 use pumpkin_data::tag::{self, Taggable};
 
 use crate::entity::EntityBase;
@@ -11,7 +12,7 @@ use crate::entity::mob::piglin_ai::{as_hoglin, as_piglin};
 
 use super::super::BrainTick;
 use super::super::memory::{MemoryModuleId, NearestVisibleLivingEntities, types};
-use super::{Sensor, find_first_in_box_by_manhattan_distance};
+use super::{Sensor, find_nearest_block_state};
 
 const REQUIRES: &[MemoryModuleId] = &[
     types::NEAREST_VISIBLE_LIVING_ENTITIES.id(),
@@ -30,15 +31,13 @@ impl Sensor for HoglinSpecificSensor {
     }
 
     fn do_tick(&mut self, tick: &mut BrainTick<'_>) {
-        let world = Arc::clone(tick.world);
-        let repellent = find_first_in_box_by_manhattan_distance(
+        let repellent = find_nearest_block_state(
+            tick.world,
             tick.mob.get_entity().block_pos.load(),
             REPELLENT_DETECTION_RANGE_HORIZONTAL,
             REPELLENT_DETECTION_RANGE_VERTICAL,
-            |pos| {
-                world
-                    .get_block(pos)
-                    .has_tag(&tag::Block::MINECRAFT_HOGLIN_REPELLENTS)
+            |state_id| {
+                Block::from_state_id(state_id).has_tag(&tag::Block::MINECRAFT_HOGLIN_REPELLENTS)
             },
         );
         tick.brain.set_optional(types::NEAREST_REPELLENT, repellent);

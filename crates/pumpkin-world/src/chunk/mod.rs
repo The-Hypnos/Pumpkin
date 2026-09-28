@@ -391,6 +391,29 @@ impl ChunkSections {
         }
     }
 
+    /// Whether any section overlapping `min_y..=max_y` holds a block state matching
+    /// `predicate`, judged from the section palettes alone.
+    pub fn any_block_in_y_range(
+        &self,
+        min_y: i32,
+        max_y: i32,
+        mut predicate: impl FnMut(BlockStateId) -> bool,
+    ) -> bool {
+        let size = BlockPalette::SIZE as i32;
+        let first = (min_y - self.min_y).max(0) / size;
+        let last = (max_y - self.min_y) / size;
+        if last < 0 {
+            return false;
+        }
+        self.block_sections
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .skip(first as usize)
+            .take((last - first + 1).max(0) as usize)
+            .any(|section| section.any(&mut predicate))
+    }
+
     pub fn set_block_absolute_y(
         &self,
         relative_x: usize,
