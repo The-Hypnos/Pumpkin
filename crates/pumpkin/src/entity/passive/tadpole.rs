@@ -1,6 +1,5 @@
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
-use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::particle::Particle;
@@ -9,19 +8,16 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::vector3::Vector3;
 
+use crate::entity::ai::brain::behavior::utils::is_alive;
+use crate::entity::ai::brain::memory::PackedMemories;
+use crate::entity::ai::brain::{Brain, BrainTick};
+use crate::entity::passive::tadpole_ai;
 use crate::entity::{
     Entity, EntityBase,
     ageable::{AgeableData, AgeableMob},
-    ai::goal::{
-        escape_danger::EscapeDangerGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, swim::SwimGoal, tempt::TemptGoal,
-        try_find_water::TryFindWaterGoal, wander_around::WanderAroundGoal,
-    },
     mob::{Mob, MobEntity},
     player::Player,
 };
-
-const TEMPT_ITEMS: &[&Item] = &[&Item::SLIME_BALL];
 
 pub struct TadpoleEntity {
     pub mob_entity: MobEntity,
@@ -30,37 +26,12 @@ pub struct TadpoleEntity {
 
 impl TadpoleEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
-        let mob_entity = MobEntity::new(entity);
-        let tadpole = Self {
-            mob_entity,
+        let tadpole = Arc::new(Self {
+            mob_entity: MobEntity::new(entity),
             ageable_data: AgeableData::default(),
-        };
-        let mob_arc = Arc::new(tadpole);
-        let mob_weak: Weak<dyn Mob> = {
-            let mob_arc: Arc<dyn Mob> = mob_arc.clone();
-            Arc::downgrade(&mob_arc)
-        };
-
-        {
-            let mut goal_selector = mob_arc
-                .mob_entity
-                .goals_selector
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-
-            goal_selector.add_goal(0, Box::new(TryFindWaterGoal));
-            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
-            goal_selector.add_goal(1, EscapeDangerGoal::new(1.5));
-            goal_selector.add_goal(2, Box::new(TemptGoal::new(1.25, TEMPT_ITEMS, false)));
-            goal_selector.add_goal(3, Box::new(WanderAroundGoal::new(1.0)));
-            goal_selector.add_goal(
-                4,
-                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
-            );
-            goal_selector.add_goal(5, Box::new(RandomLookAroundGoal::default()));
-        };
-
-        mob_arc
+        });
+        tadpole.mob_entity.init_brain(tadpole.as_ref());
+        tadpole
     }
 
     fn is_food(item_stack: &ItemStack) -> bool {
@@ -90,6 +61,22 @@ impl Mob for TadpoleEntity {
 
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn make_brain(&self, packed: &PackedMemories) -> Brain {
+        tadpole_ai::TADPOLE_PROVIDER.make_brain(self, packed)
+    }
+
+    fn after_brain_tick(&self, tick: &mut BrainTick<'_>) {
+        tadpole_ai::update_activity(tick);
+    }
+
+    fn custom_server_ai_step(&self, _caller: &dyn EntityBase) {
+        if !is_alive(self) {
+            self.mob_entity.apply_brain_inbox(self);
+            return;
+        }
+        self.mob_entity.tick_brain(self);
     }
 
     fn mob_tick(&self, _caller: &dyn EntityBase) {

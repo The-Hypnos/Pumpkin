@@ -3,6 +3,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::entity::EntityBase;
+use crate::entity::ai::util::default_random_pos;
 use crate::world::World;
 
 use super::super::memory::position_tracker::{BlockPosTracker, EntityTracker, PositionTracker};
@@ -195,4 +196,32 @@ pub fn global_pos_in(
 #[must_use]
 pub fn is_breeding(brain: &Brain) -> bool {
     brain.has_memory_value(types::BREED_TARGET.id())
+}
+
+/// Vanilla `BehaviorUtils.getRandomSwimmablePos`: up to ten rerolls for a water-pathable spot.
+#[must_use]
+pub fn get_random_swimmable_pos(
+    mob: &dyn crate::entity::mob::Mob,
+    max_horizontal_distance: i32,
+    max_vertical_distance: i32,
+) -> Option<pumpkin_util::math::vector3::Vector3<f64>> {
+    let world = mob.get_entity().world.load();
+    let is_swimmable = |pos: pumpkin_util::math::vector3::Vector3<f64>| {
+        let (block, state) =
+            world.get_block_and_state(&pumpkin_util::math::position::BlockPos::floored_v(pos));
+        world
+            .block_registry
+            .is_pathfindable(block, state, crate::block::PathComputationType::Water)
+    };
+    let mut target =
+        default_random_pos::get_pos(mob, max_horizontal_distance, max_vertical_distance);
+    let mut count = 0;
+    while let Some(pos) = target {
+        if is_swimmable(pos) || count >= 10 {
+            break;
+        }
+        count += 1;
+        target = default_random_pos::get_pos(mob, max_horizontal_distance, max_vertical_distance);
+    }
+    target
 }

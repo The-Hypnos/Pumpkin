@@ -96,6 +96,8 @@ pub struct MobEntity {
     pub move_control: std::sync::Mutex<Box<dyn MoveControlTrait>>,
     pub brain: std::sync::Mutex<Brain>,
     pub brain_inbox: std::sync::Mutex<Vec<BrainMessage>>,
+    /// `IS_PANICKING` as of the last brain tick, readable without locking the brain.
+    pub brain_panicking: AtomicBool,
     pub position_target: AtomicCell<BlockPos>,
     pub position_target_range: AtomicI32,
     pub love_ticks: AtomicI32,
@@ -184,6 +186,7 @@ impl MobEntity {
             move_control: std::sync::Mutex::new(Box::new(MoveControl::default())),
             brain: std::sync::Mutex::new(Brain::default()),
             brain_inbox: std::sync::Mutex::new(Vec::new()),
+            brain_panicking: AtomicBool::new(false),
             position_target: AtomicCell::new(BlockPos::ZERO),
             position_target_range: AtomicI32::new(-1),
             love_ticks: AtomicI32::new(0),
@@ -511,6 +514,10 @@ impl MobEntity {
             time,
         };
         mob.after_brain_tick(&mut tick);
+        self.brain_panicking.store(
+            brain.has_memory_value(crate::entity::ai::brain::memory::types::IS_PANICKING.id()),
+            Relaxed,
+        );
     }
 
     /// Vanilla `LivingEntity.remove` ends with `brain.clearMemories()`. Memories hold strong
@@ -1671,9 +1678,12 @@ impl<T: Mob + Send + 'static> EntityBase for T {
             .store(ticks, Relaxed);
     }
 
+    // Vanilla `PathfinderMob.isPanicking` checks the brain before the panic goal.
     fn is_panicking(&self) -> bool {
-        self.get_path_aware_entity()
-            .is_some_and(PathAwareEntity::is_panicking)
+        self.get_mob_entity().brain_panicking.load(Relaxed)
+            || self
+                .get_path_aware_entity()
+                .is_some_and(PathAwareEntity::is_panicking)
     }
 
     fn get_job_site_pos(&self) -> Option<pumpkin_util::math::position::BlockPos> {
