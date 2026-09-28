@@ -16,6 +16,7 @@ use crate::entity::ageable::{AgeableData, AgeableMob};
 use crate::entity::ai::brain::memory::{PackedMemories, types};
 use crate::entity::ai::brain::{Brain, BrainTick};
 use crate::entity::mob::hoglin_base::{self, ATTACK_ANIMATION_DURATION};
+use crate::entity::mob::sounds::{self, AmbientSoundTimer};
 use crate::entity::mob::{Mob, MobEntity, hoglin_ai};
 use crate::entity::passive::animal::Animal;
 use crate::entity::player::Player;
@@ -29,7 +30,7 @@ pub struct HoglinEntity {
     pub time_in_overworld: AtomicI32,
     pub cannot_be_hunted: AtomicBool,
     attack_animation_remaining_ticks: AtomicI32,
-    ambient_sound_time: AtomicI32,
+    ambient_sound_timer: AmbientSoundTimer,
     was_baby: AtomicBool,
     /// Copy of the `NEAREST_REPELLENT` memory for `get_walk_target_value`, which runs inside
     /// the brain tick where the brain cannot be locked again.
@@ -42,7 +43,6 @@ impl HoglinEntity {
     const BABY_XP_REWARD: u32 = 3;
     const ADULT_ATTACK_DAMAGE: f64 = 6.0;
     const BABY_ATTACK_DAMAGE: f64 = 0.5;
-    const AMBIENT_SOUND_INTERVAL: i32 = 80;
     pub const BABY_DIMENSIONS: EntityDimensions = EntityDimensions {
         width: 0.75,
         height: 0.85,
@@ -87,7 +87,7 @@ impl HoglinEntity {
             time_in_overworld: AtomicI32::new(0),
             cannot_be_hunted: AtomicBool::new(false),
             attack_animation_remaining_ticks: AtomicI32::new(0),
-            ambient_sound_time: AtomicI32::new(0),
+            ambient_sound_timer: AmbientSoundTimer::new(),
             was_baby: AtomicBool::new(false),
             nearest_repellent: AtomicCell::new(None),
         });
@@ -124,23 +124,12 @@ impl HoglinEntity {
             && world.dimension.piglins_zombify
     }
 
-    /// Vanilla `Mob.makeSound`, pitched like `getVoicePitch`.
     pub fn make_sound(&self, sound: Sound) {
-        let entity = &self.mob_entity.living_entity.entity;
-        let base_pitch = if self.is_baby() { 1.5 } else { 1.0 };
-        let pitch = (rand::random::<f32>() - rand::random::<f32>()).mul_add(0.2, base_pitch);
-        entity.world.load().play_sound_fine(
-            sound,
-            SoundCategory::Hostile,
-            &entity.pos.load(),
-            1.0,
-            pitch,
-        );
+        sounds::make_sound(self, sound, SoundCategory::Hostile);
     }
 
     fn tick_ambient_sound(&self) {
-        if rand::random_range(0..1000) < self.ambient_sound_time.fetch_add(1, Ordering::Relaxed) {
-            self.reset_ambient_sound_time();
+        if self.ambient_sound_timer.tick() {
             let sound = self
                 .mob_entity
                 .with_brain(self, |tick| hoglin_ai::get_sound_for_current_activity(tick));
@@ -148,11 +137,6 @@ impl HoglinEntity {
                 self.make_sound(sound);
             }
         }
-    }
-
-    fn reset_ambient_sound_time(&self) {
-        self.ambient_sound_time
-            .store(-Self::AMBIENT_SOUND_INTERVAL, Ordering::Relaxed);
     }
 
     /// Vanilla `Hoglin.ageBoundaryReached`. Pumpkin writes the age from several places, so
@@ -343,7 +327,7 @@ impl Mob for HoglinEntity {
     }
 
     fn on_damage(&self, _damage_type: DamageType, source: Option<&dyn EntityBase>) {
-        self.reset_ambient_sound_time();
+        self.ambient_sound_timer.reset();
         let Some(attacker) = source else {
             return;
         };
