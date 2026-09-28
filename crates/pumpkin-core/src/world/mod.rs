@@ -27,6 +27,7 @@ pub mod explosion;
 pub mod generation_cache;
 pub mod loot;
 pub mod map;
+pub mod poi_manager;
 pub mod portal;
 pub mod raid;
 pub mod random_sequences;
@@ -280,6 +281,7 @@ pub struct World {
     pub portal_poi: std::sync::Mutex<portal::PortalPoiStorage>,
     /// Villager job sites and their current owners.
     pub villager_poi: std::sync::Mutex<villager_poi::VillagerPoiStorage>,
+    pub poi_manager: poi_manager::PoiManager,
     /// Active raids in this world.
     pub raids: std::sync::Mutex<raid::Raids>,
     /// End Dragon fight manager (only present in `THE_END` dimension).
@@ -419,6 +421,7 @@ impl World {
             unsent_block_changes: std::sync::Mutex::new(HashMap::new()),
             portal_poi: std::sync::Mutex::new(portal_poi),
             villager_poi: std::sync::Mutex::new(villager_poi::VillagerPoiStorage::default()),
+            poi_manager: poi_manager::PoiManager::default(),
             raids: std::sync::Mutex::new(raid::Raids::default()),
             dragon_fight,
             spawn_state: ArcSwap::new(Arc::new(SpawnState::empty())),
@@ -490,9 +493,11 @@ impl World {
                 self.migrate_pending_block_entities(pos);
             }
         }
+        self.poi_manager.apply_loaded_regions(self);
         for change in self.level.loaded_chunk_changes() {
             match change {
                 pumpkin_world::level::LoadedChunkChange::Loaded(pos) => {
+                    self.poi_manager.on_chunk_loaded(self, pos);
                     if active_chunks.contains(&pos)
                         && self.level.is_chunk_loaded(&pos)
                         && tracker.loaded_active_chunks.insert(pos)
@@ -503,6 +508,7 @@ impl World {
                 pumpkin_world::level::LoadedChunkChange::Unloaded(pos) => {
                     if !self.level.is_chunk_loaded(&pos) {
                         tracker.loaded_active_chunks.remove(&pos);
+                        self.poi_manager.on_chunk_unloaded(pos);
                     }
                 }
             }
@@ -5218,18 +5224,12 @@ impl World {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .update_block(*position, new_block);
 
-            if is_new_block {
-                let mut poi = self
-                    .portal_poi
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if villager_poi::profession_for_block(old_block).is_some() {
-                    poi.remove(position);
-                }
-                if let Some(poi_type) = villager_poi::poi_type_for_block(new_block) {
-                    poi.add_with_free_tickets(*position, poi_type, 1);
-                }
-            }
+            self.poi_manager.on_block_changed(
+                self,
+                position,
+                replaced_block_state_id,
+                block_state_id,
+            );
         }
 
         let old_state = replaced_block_state_id.to_state();
