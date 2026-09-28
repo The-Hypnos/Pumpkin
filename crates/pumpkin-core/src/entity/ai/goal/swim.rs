@@ -17,7 +17,8 @@ impl Default for SwimGoal {
 }
 
 impl SwimGoal {
-    fn is_in_fluid(mob: &dyn Mob) -> bool {
+    /// Vanilla `isInFluidDeeperThan(getFluidJumpThreshold(), ENTITY_FLOATABLE) || isInLava()`.
+    pub fn is_in_fluid(mob: &dyn Mob) -> bool {
         let living = &mob.get_mob_entity().living_entity;
         let entity = &living.entity;
         let in_water = entity.touching_water.load(Ordering::SeqCst)

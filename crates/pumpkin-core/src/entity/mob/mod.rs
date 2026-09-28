@@ -40,6 +40,7 @@ pub mod blaze;
 pub mod breeze;
 pub mod cave_spider;
 pub mod creaking;
+pub mod creaking_ai;
 pub mod creeper;
 pub mod crossbow_attack_mob;
 pub mod elder_guardian;
