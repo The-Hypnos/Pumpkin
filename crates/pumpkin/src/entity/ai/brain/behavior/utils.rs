@@ -107,6 +107,46 @@ pub fn throw_item(
     world.spawn_entity(Arc::new(item_entity));
 }
 
+/// Queues `write` on another mob's brain, handing it this mob; vanilla writes it inline, but a
+/// tick must not lock a second brain.
+pub fn post_to_other(
+    tick: &super::super::BrainTick<'_>,
+    other: &Arc<dyn EntityBase>,
+    write: impl FnOnce(&mut super::super::BrainTick<'_>, Arc<dyn EntityBase>) + Send + 'static,
+) {
+    let Some(other_mob) = other.as_mob_entity() else {
+        return;
+    };
+    let body_id = tick.mob.get_entity().entity_id;
+    let Some(body) = tick.world.get_entity_by_id(body_id) else {
+        return;
+    };
+    other_mob.post_to_brain(Box::new(move |other_tick| write(other_tick, body)));
+}
+
+/// Vanilla `BehaviorUtils.lockGazeAndWalkToEachOther`; the other mob's half lands next tick.
+pub fn lock_gaze_and_walk_to_each_other(
+    tick: &mut super::super::BrainTick<'_>,
+    other: &Arc<dyn EntityBase>,
+    speed_modifier: f32,
+    close_enough_distance: i32,
+) {
+    set_walk_and_look_target_memories_to_entity(
+        tick.brain,
+        Arc::clone(other),
+        speed_modifier,
+        close_enough_distance,
+    );
+    post_to_other(tick, other, move |other_tick, body| {
+        set_walk_and_look_target_memories_to_entity(
+            other_tick.brain,
+            body,
+            speed_modifier,
+            close_enough_distance,
+        );
+    });
+}
+
 pub fn set_walk_and_look_target_memories(
     brain: &mut Brain,
     target: Arc<dyn PositionTracker>,

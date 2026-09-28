@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use pumpkin_data::{BlockState, entity::EntityType};
+use pumpkin_data::tag::{self, Taggable};
+use pumpkin_data::{Block, BlockState, entity::EntityType};
 use pumpkin_util::math::{
     boundingbox::{BoundingBox, EntityDimensions},
     position::BlockPos,
@@ -15,6 +16,8 @@ use crate::world::World;
 #[derive(Clone, Copy)]
 pub enum SpawnStrategy {
     OnTopOfCollider,
+    /// Vanilla `LEGACY_IRON_GOLEM`, used when villagers summon a golem.
+    LegacyIronGolem,
 }
 
 impl SpawnStrategy {
@@ -23,8 +26,36 @@ impl SpawnStrategy {
             Self::OnTopOfCollider => {
                 above_state.get_block_collision_shapes().next().is_none() && is_face_full_up(state)
             }
+            Self::LegacyIronGolem => {
+                let block = Block::from_state_id(state.id);
+                !is_legacy_golem_blocker(block)
+                    && (above_state.is_air() || above_state.is_liquid())
+                    && (state.is_solid() || block == &Block::POWDER_SNOW)
+            }
         }
     }
+}
+
+fn is_legacy_golem_blocker(block: &Block) -> bool {
+    [
+        &Block::COBWEB,
+        &Block::CACTUS,
+        &Block::GLASS_PANE,
+        &Block::CONDUIT,
+        &Block::ICE,
+        &Block::TNT,
+        &Block::GLOWSTONE,
+        &Block::BEACON,
+        &Block::SEA_LANTERN,
+        &Block::FROSTED_ICE,
+        &Block::TINTED_GLASS,
+        &Block::GLASS,
+    ]
+    .contains(&block)
+        || block.has_tag(&tag::Block::MINECRAFT_LEAVES)
+        // Vanilla's `StainedGlassBlock` and `StainedGlassPaneBlock` classes have no block tag.
+        || block.name.ends_with("_stained_glass")
+        || block.name.ends_with("_stained_glass_pane")
 }
 
 fn is_face_full_up(state: &BlockState) -> bool {

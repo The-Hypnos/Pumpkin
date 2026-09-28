@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pumpkin_data::entity::EntityType;
+use pumpkin_data::entity::{EntityType, MobCategory};
 
 use crate::entity::EntityBase;
 
@@ -58,6 +58,17 @@ pub fn set_entity_look_target(
 pub fn set_entity_look_target_of_type(entity_type: &'static EntityType, max_dist: f32) -> OneShot {
     set_entity_look_target(
         move |entity| entity.get_entity().entity_type == entity_type,
+        max_dist,
+    )
+}
+
+#[must_use]
+pub fn set_entity_look_target_of_category(
+    category: &'static MobCategory,
+    max_dist: f32,
+) -> OneShot {
+    set_entity_look_target(
+        move |entity| entity.get_entity().entity_type.category.id == category.id,
         max_dist,
     )
 }

@@ -392,6 +392,15 @@ impl BedBlock {
 }
 
 impl BedBlock {
+    /// Vanilla `AbstractBedBlock.getSleepHeight`: the top of the bed's shape, if it has one.
+    #[must_use]
+    pub fn sleep_height(state: &BlockState) -> Option<f64> {
+        state
+            .get_block_outline_shapes()
+            .map(|shape| shape.max.y)
+            .reduce(f64::max)
+    }
+
     /// Vanilla `AbstractBedBlock.findStandUpPosition`: where a mob leaving the bed stands,
     /// trying beside the bed first and on top of it last.
     #[must_use]

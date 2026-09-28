@@ -295,7 +295,9 @@ pub struct PoiManager {
 /// How many sections' village distances are kept before the cache starts over.
 const VILLAGE_DISTANCE_CACHE_LIMIT: usize = 8192;
 
-fn section_of(pos: &BlockPos) -> (i32, i32, i32) {
+/// Vanilla `SectionPos.of`.
+#[must_use]
+pub const fn section_of(pos: &BlockPos) -> (i32, i32, i32) {
     (pos.0.x >> 4, pos.0.y >> 4, pos.0.z >> 4)
 }
 

@@ -75,12 +75,13 @@ pub use look_at_target_sink::LookAtTargetSink;
 pub use melee_attack::melee_attack;
 pub use mount::mount;
 pub use move_to_target_sink::MoveToTargetSink;
-pub use one_shot::{OneShot, Trigger};
+pub use one_shot::{OneShot, Trigger, trigger_one_shuffled_of};
 pub use ram::{PrepareRamNearestTarget, RamTarget};
 pub use random_look_around::RandomLookAround;
 pub use random_stroll::{fly, stroll, stroll_with_range, swim};
 pub use set_entity_look_target::{
-    set_entity_look_target, set_entity_look_target_any, set_entity_look_target_of_type,
+    set_entity_look_target, set_entity_look_target_any, set_entity_look_target_of_category,
+    set_entity_look_target_of_type,
 };
 pub use set_entity_look_target_sometimes::{Ticker, set_entity_look_target_sometimes};
 pub use set_look_and_interact::set_look_and_interact;

@@ -127,6 +127,35 @@ pub fn trigger_gate(
     })
 }
 
+/// Vanilla `TriggerGate.triggerOneShuffled` over one-shot behaviours, keeping the memories they
+/// need registered.
+#[must_use]
+pub fn trigger_one_shuffled_of(name: &'static str, weighted: Vec<(OneShot, i32)>) -> OneShot {
+    let mut required = Vec::new();
+    let mut triggers = ShufflingList::new();
+    for (mut shot, weight) in weighted {
+        for id in &shot.required {
+            if !required.contains(id) {
+                required.push(*id);
+            }
+        }
+        triggers.add(
+            Box::new(move |tick: &mut BrainTick<'_>| shot.fire(tick)) as Trigger,
+            weight,
+        );
+    }
+    OneShot::with_required(name, Vec::new(), required, move |tick| {
+        let mut rng = tick.mob.get_random();
+        triggers.shuffle(&mut rng);
+        for trigger in triggers.iter_mut() {
+            if trigger(tick) {
+                break;
+            }
+        }
+        true
+    })
+}
+
 #[must_use]
 pub fn trigger_one_shuffled(name: &'static str, weighted_triggers: Vec<(Trigger, i32)>) -> OneShot {
     trigger_gate(
