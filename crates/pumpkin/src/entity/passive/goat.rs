@@ -1,29 +1,36 @@
 use std::sync::{
-    Arc, Weak,
+    Arc,
     atomic::{AtomicBool, Ordering},
 };
 
+use pumpkin_data::attributes::Attributes;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_util::math::vector3::Vector3;
+use rand::RngExt;
 
+use crate::entity::ai::brain::behavior::utils::is_alive;
+use crate::entity::ai::brain::memory::PackedMemories;
+use crate::entity::ai::brain::{Brain, BrainTick};
+use crate::entity::item::ItemEntity;
+use crate::entity::passive::goat_ai;
 use crate::entity::{
     Entity, EntityBase,
     ageable::{AgeableData, AgeableMob},
-    ai::goal::{
-        breed::BreedGoal, escape_danger::EscapeDangerGoal, follow_parent::FollowParentGoal,
-        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal, swim::SwimGoal,
-        tempt::TemptGoal, wander_around::WanderAroundGoal,
-    },
     mob::{Mob, MobEntity},
     passive::animal::Animal,
     player::Player,
 };
 
 const TEMPT_ITEMS: &[&Item] = &[&Item::WHEAT];
+const ADULT_ATTACK_DAMAGE: f64 = 2.0;
+const BABY_ATTACK_DAMAGE: f64 = 1.0;
+// Vanilla builds this `ItemEntity` directly, which leaves the pickup delay at 0.
+const HORN_DROP_PICKUP_DELAY: u8 = 0;
 
 pub struct GoatEntity {
     pub mob_entity: MobEntity,
@@ -31,45 +38,79 @@ pub struct GoatEntity {
     pub is_screaming: AtomicBool,
     pub has_left_horn: AtomicBool,
     pub has_right_horn: AtomicBool,
+    was_baby: AtomicBool,
 }
 
 impl GoatEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
-        let mob_entity = MobEntity::new(entity);
-        let goat = Self {
-            mob_entity,
+        let goat = Arc::new(Self {
+            mob_entity: MobEntity::new(entity),
             ageable_data: AgeableData::default(),
             is_screaming: AtomicBool::new(false),
             has_left_horn: AtomicBool::new(true),
             has_right_horn: AtomicBool::new(true),
-        };
-        let mob_arc = Arc::new(goat);
-        let mob_weak: Weak<dyn Mob> = {
-            let mob_arc: Arc<dyn Mob> = mob_arc.clone();
-            Arc::downgrade(&mob_arc)
-        };
+            was_baby: AtomicBool::new(false),
+        });
+        goat.mob_entity.init_brain(goat.as_ref());
+        // Vanilla seeds these in `finalizeSpawn` and for bred offspring.
+        goat.mob_entity.with_brain(goat.as_ref(), |tick| {
+            goat_ai::init_memories(tick.brain, tick.mob);
+        });
+        goat
+    }
 
-        {
-            let mut goal_selector = mob_arc
-                .mob_entity
-                .goals_selector
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+    /// Vanilla `Goat.ageBoundaryReached`.
+    fn age_boundary_reached(&self, baby: bool) {
+        self.mob_entity.living_entity.set_attribute_base(
+            &Attributes::ATTACK_DAMAGE,
+            if baby {
+                BABY_ATTACK_DAMAGE
+            } else {
+                ADULT_ATTACK_DAMAGE
+            },
+        );
+    }
 
-            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
-            goal_selector.add_goal(1, EscapeDangerGoal::new(2.0));
-            goal_selector.add_goal(2, BreedGoal::new(1.0));
-            goal_selector.add_goal(3, Box::new(TemptGoal::new(1.25, TEMPT_ITEMS, false)));
-            goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.25)));
-            goal_selector.add_goal(6, Box::new(WanderAroundGoal::new(1.0)));
-            goal_selector.add_goal(
-                7,
-                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
-            );
-            goal_selector.add_goal(8, Box::new(RandomLookAroundGoal::default()));
+    /// Vanilla `Goat.dropHorn`, which picks a random side when both horns are left.
+    pub fn drop_horn(&self) -> bool {
+        if self.is_baby() {
+            return false;
+        }
+        let (has_left, has_right) = (self.has_left_horn(), self.has_right_horn());
+        if !has_left && !has_right {
+            return false;
+        }
+        let mut rng = self.get_random();
+        let drop_left = if !has_left {
+            false
+        } else if !has_right {
+            true
+        } else {
+            rng.random::<bool>()
         };
-
-        mob_arc
+        if drop_left {
+            self.set_has_left_horn(false);
+        } else {
+            self.set_has_right_horn(false);
+        }
+        let entity = self.get_entity();
+        let world = entity.world.load_full();
+        let pos = entity.pos.load();
+        let velocity = Vector3::new(
+            f64::from(rng.random_range(-0.2f32..0.2)),
+            f64::from(rng.random_range(0.3f32..0.7)),
+            f64::from(rng.random_range(-0.2f32..0.2)),
+        );
+        // TODO: pick the instrument from the goat horn instrument tags once they are extracted.
+        let horn = ItemStack::new(1, &Item::GOAT_HORN);
+        let item_entity = Entity::new(Arc::clone(&world), pos, &EntityType::ITEM);
+        world.spawn_entity(Arc::new(ItemEntity::new_with_velocity(
+            item_entity,
+            horn,
+            velocity,
+            HORN_DROP_PICKUP_DELAY,
+        )));
+        true
     }
 
     #[must_use]
@@ -159,8 +200,28 @@ impl Mob for GoatEntity {
         &self.mob_entity
     }
 
+    fn make_brain(&self, packed: &PackedMemories) -> Brain {
+        goat_ai::GOAT_PROVIDER.make_brain(self, packed)
+    }
+
+    fn after_brain_tick(&self, tick: &mut BrainTick<'_>) {
+        goat_ai::update_activity(tick);
+    }
+
+    fn custom_server_ai_step(&self, _caller: &dyn EntityBase) {
+        if !is_alive(self) {
+            self.mob_entity.apply_brain_inbox(self);
+            return;
+        }
+        self.mob_entity.tick_brain(self);
+    }
+
     fn mob_tick(&self, _caller: &dyn EntityBase) {
         self.ageable_ai_step();
+        let baby = self.is_baby();
+        if self.was_baby.swap(baby, Ordering::Relaxed) != baby {
+            self.age_boundary_reached(baby);
+        }
     }
 
     fn mob_init_data_tracker(&self) {
