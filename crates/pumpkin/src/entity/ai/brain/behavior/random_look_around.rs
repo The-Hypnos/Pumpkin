@@ -38,7 +38,8 @@ impl RandomLookAround {
 }
 
 /// Vanilla `Vec3.directionFromRotation`.
-fn direction_from_rotation(pitch: f32, yaw: f32) -> Vector3<f64> {
+#[must_use]
+pub fn direction_from_rotation(pitch: f32, yaw: f32) -> Vector3<f64> {
     let y_cos = cos(-yaw * DEGREES_TO_RADIANS - std::f32::consts::PI);
     let y_sin = sin(-yaw * DEGREES_TO_RADIANS - std::f32::consts::PI);
     let x_cos = -cos(-pitch * DEGREES_TO_RADIANS);

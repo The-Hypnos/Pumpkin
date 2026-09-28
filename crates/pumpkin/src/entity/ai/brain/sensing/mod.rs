@@ -14,6 +14,7 @@ use super::{BrainTick, VisibilityContext};
 
 pub mod adult;
 pub mod axolotl_attackables;
+pub mod breeze_attack_entity;
 pub mod dummy;
 pub mod frog_attackables;
 pub mod golem;
@@ -30,6 +31,7 @@ pub mod tempting;
 
 pub use adult::{AdultSensor, AdultSensorAnyType};
 pub use axolotl_attackables::AxolotlAttackablesSensor;
+pub use breeze_attack_entity::BreezeAttackEntitySensor;
 pub use dummy::DummySensor;
 pub use frog_attackables::FrogAttackablesSensor;
 pub use golem::{GOLEM_SCAN_RATE, GolemSensor};
@@ -76,6 +78,7 @@ pub enum SensorType {
     AxolotlAttackables,
     ArmadilloScareDetected,
     NautilusTemptations,
+    BreezeAttackEntity,
 }
 
 impl SensorType {
@@ -100,6 +103,7 @@ impl SensorType {
             Self::AxolotlAttackables => "minecraft:axolotl_attackables",
             Self::ArmadilloScareDetected => "minecraft:armadillo_scare_detected",
             Self::NautilusTemptations => "minecraft:nautilus_temptations",
+            Self::BreezeAttackEntity => "minecraft:breeze_attack_entity_sensor",
         }
     }
 
@@ -121,7 +125,8 @@ impl SensorType {
             | Self::FrogTemptations
             | Self::FrogAttackables
             | Self::AxolotlAttackables
-            | Self::NautilusTemptations => DEFAULT_SCAN_RATE,
+            | Self::NautilusTemptations
+            | Self::BreezeAttackEntity => DEFAULT_SCAN_RATE,
             Self::GolemDetected => GOLEM_SCAN_RATE,
             Self::ArmadilloScareDetected => armadillo_ai::SCARE_SCAN_RATE,
         }
@@ -153,6 +158,7 @@ impl SensorType {
                 armadillo_ai::SCARE_MEMORY_TIME_TO_LIVE,
             )),
             Self::NautilusTemptations => Box::new(TemptingSensor::new(nautilus_ai::is_temptation)),
+            Self::BreezeAttackEntity => Box::new(BreezeAttackEntitySensor),
         }
     }
 
