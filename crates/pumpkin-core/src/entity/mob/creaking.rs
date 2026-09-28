@@ -175,11 +175,7 @@ impl CreakingEntity {
     }
 
     pub fn stop_in_place(&self) {
-        let entity = &self.mob_entity.living_entity.entity;
-        entity.velocity.store(Vector3::default());
-        if let Ok(mut navigator) = self.mob_entity.navigator.lock() {
-            navigator.stop();
-        }
+        self.mob_entity.stop_in_place();
     }
 
     pub fn activate(&self, player: &Arc<Player>) {

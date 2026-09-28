@@ -426,6 +426,21 @@ impl MobEntity {
         }
     }
 
+    /// Vanilla `Mob.stopInPlace`: drops the path, the movement input and the velocity.
+    pub fn stop_in_place(&self) {
+        self.navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
+        self.living_entity
+            .movement_input
+            .store(Vector3::new(0.0, 0.0, 0.0));
+        self.living_entity
+            .entity
+            .velocity
+            .store(Vector3::new(0.0, 0.0, 0.0));
+    }
+
     /// Queues a write to this mob's brain; writing another mob's brain directly deadlocks.
     pub fn post_to_brain(&self, message: BrainMessage) {
         self.brain_inbox
