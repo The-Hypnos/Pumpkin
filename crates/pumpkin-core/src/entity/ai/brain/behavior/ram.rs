@@ -434,14 +434,10 @@ impl Behavior for RamTarget {
         let body_box = tick.mob.get_entity().bounding_box.load();
         let hit = tick
             .world
-            .get_entities_at_box(&body_box)
+            .entity_grid
+            .load()
+            .collect_in_box(&body_box)
             .into_iter()
-            .chain(
-                tick.world
-                    .get_players_at_box(&body_box)
-                    .into_iter()
-                    .map(|player| player as Arc<dyn EntityBase>),
-            )
             .find(|entity| {
                 entity.get_living_entity().is_some()
                     && self

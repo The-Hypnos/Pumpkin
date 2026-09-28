@@ -217,33 +217,17 @@ fn entities_in_inflated_box(
     let body_pos = body.pos.load();
     let body_id = body.entity_id;
 
-    let entities = world.entities.load();
-    let players = world.players.load();
-    // Players are not in world.entities
-    let mut found: Vec<(f64, Arc<dyn EntityBase>)> = entities
-        .iter()
-        .map(Arc::clone)
-        .chain(
-            players
-                .iter()
-                .map(|player| Arc::clone(player) as Arc<dyn EntityBase>),
-        )
-        .filter(|entity| {
-            entity.get_entity().entity_id != body_id
-                && entity.get_entity().bounding_box.load().intersects(&bounds)
-                && filter(entity)
-        })
-        .map(|entity| {
-            (
-                entity
-                    .get_entity()
-                    .pos
-                    .load()
-                    .squared_distance_to_vec(&body_pos),
-                entity,
-            )
-        })
-        .collect();
+    let mut found: Vec<(f64, Arc<dyn EntityBase>)> = Vec::new();
+    world.entity_grid.load().for_each_in_box(&bounds, |entity| {
+        if entity.get_entity().entity_id != body_id && filter(entity) {
+            let distance = entity
+                .get_entity()
+                .pos
+                .load()
+                .squared_distance_to_vec(&body_pos);
+            found.push((distance, Arc::clone(entity)));
+        }
+    });
     found.sort_by(|a, b| a.0.total_cmp(&b.0));
     found.into_iter().map(|(_, entity)| entity).collect()
 }
