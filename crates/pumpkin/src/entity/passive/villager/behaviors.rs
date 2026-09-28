@@ -2439,3 +2439,350 @@ pub fn update_activity_from_schedule() -> OneShot {
         true
     })
 }
+
+/// The parts of vanilla `ServerLevel.getRaidAt` the villager behaviours read, copied out so
+/// the raid lock is held only for the lookup.
+#[derive(Clone, Copy)]
+pub struct RaidState {
+    pub id: i32,
+    pub active: bool,
+    pub over: bool,
+    pub victory: bool,
+    pub loss: bool,
+    pub stopped: bool,
+    pub first_wave_spawned: bool,
+    pub between_waves: bool,
+}
+
+/// Vanilla `ServerLevel.getRaidAt`.
+#[must_use]
+pub fn raid_at(world: &crate::world::World, pos: &BlockPos) -> Option<RaidState> {
+    let raids = world
+        .raids
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    raids
+        .get_nearby_raid(pos, crate::world::raid::Raid::VALID_RAID_RADIUS_SQR)
+        .map(|raid| RaidState {
+            id: raid.id,
+            active: raid.is_active(),
+            over: raid.is_over(),
+            victory: raid.is_victory(),
+            loss: raid.is_loss(),
+            stopped: raid.is_stopped(),
+            first_wave_spawned: raid.has_first_wave_spawned(),
+            between_waves: raid.is_between_waves(),
+        })
+}
+
+/// Vanilla `ReactToBell`.
+#[must_use]
+pub fn react_to_bell() -> OneShot {
+    OneShot::new(
+        "ReactToBell",
+        vec![(types::HEARD_BELL_TIME.id(), MemoryStatus::ValuePresent)],
+        |tick| {
+            if raid_at(tick.world, &tick.mob.get_entity().block_pos.load()).is_none() {
+                tick.brain.set_active_activity_if_possible(Activity::Hide);
+            }
+            true
+        },
+    )
+}
+
+/// Vanilla `SetRaidStatus`.
+#[must_use]
+pub fn set_raid_status() -> OneShot {
+    OneShot::new("SetRaidStatus", Vec::new(), |tick| {
+        if tick.mob.get_random().random_range(0..20) != 0 {
+            return false;
+        }
+        if let Some(raid) = raid_at(tick.world, &tick.mob.get_entity().block_pos.load()) {
+            let activity = if raid.first_wave_spawned && !raid.between_waves {
+                Activity::Raid
+            } else {
+                Activity::PreRaid
+            };
+            tick.brain.set_default_activity(activity);
+            tick.brain.set_active_activity_if_possible(activity);
+        }
+        true
+    })
+}
+
+/// Vanilla `ResetRaidStatus`.
+#[must_use]
+pub fn reset_raid_status() -> OneShot {
+    OneShot::new("ResetRaidStatus", Vec::new(), |tick| {
+        if tick.mob.get_random().random_range(0..20) != 0 {
+            return false;
+        }
+        let raid = raid_at(tick.world, &tick.mob.get_entity().block_pos.load());
+        if raid.is_none_or(|raid| raid.stopped || raid.loss) {
+            tick.brain.set_default_activity(Activity::Idle);
+            tick.brain
+                .update_activity_from_schedule(tick.world, tick.time);
+        }
+        true
+    })
+}
+
+/// Vanilla `RingBell`: a villager at the meeting point now and then rings its bell.
+#[must_use]
+pub fn ring_bell() -> OneShot {
+    const BELL_RING_CHANCE: f32 = 0.95;
+    const RING_BELL_FROM_DISTANCE: i32 = 3;
+    OneShot::new(
+        "RingBell",
+        vec![(types::MEETING_POINT.id(), MemoryStatus::ValuePresent)],
+        |tick| {
+            if tick.mob.get_random().random::<f32>() <= BELL_RING_CHANCE {
+                return false;
+            }
+            let Some(meeting) = tick.brain.get(types::MEETING_POINT).copied() else {
+                return false;
+            };
+            let pos = meeting.pos;
+            if pos.squared_distance(&tick.mob.get_entity().block_pos.load())
+                < RING_BELL_FROM_DISTANCE * RING_BELL_FROM_DISTANCE
+                && tick.world.get_block(&pos) == &Block::BELL
+            {
+                let ringer = villager(tick).and_then(|body| {
+                    body.self_weak
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .as_ref()
+                        .and_then(std::sync::Weak::upgrade)
+                        .map(|body| body as Arc<dyn EntityBase>)
+                });
+                crate::block::blocks::redstone::bell::ring_bell(pos, tick.world, None, ringer);
+            }
+            true
+        },
+    )
+}
+
+/// Vanilla `MoveToSkySeeingSpot.hasNoBlocksAbove`.
+#[must_use]
+pub fn has_no_blocks_above(tick: &BrainTick<'_>, target: &BlockPos) -> bool {
+    tick.world.can_see_sky(target)
+        && f64::from(tick.world.get_heightmap_height(
+            pumpkin_world::chunk::ChunkHeightmapType::MotionBlocking,
+            target.0.x,
+            target.0.z,
+        )) <= tick.mob.get_entity().pos.load().y
+}
+
+/// Vanilla `MoveToSkySeeingSpot`: heads outdoors to watch a raid end.
+#[must_use]
+pub fn move_to_sky_seeing_spot(speed_modifier: f32) -> OneShot {
+    OneShot::new(
+        "MoveToSkySeeingSpot",
+        vec![(types::WALK_TARGET.id(), MemoryStatus::ValueAbsent)],
+        move |tick| {
+            let body_pos = tick.mob.get_entity().block_pos.load();
+            if tick.world.can_see_sky(&body_pos) {
+                return false;
+            }
+            // Vanilla `getOutdoorPosition`.
+            for _ in 0..10 {
+                let offset = {
+                    let mut rng = tick.mob.get_random();
+                    Vector3::new(
+                        rng.random_range(0..20) - 10,
+                        rng.random_range(0..6) - 3,
+                        rng.random_range(0..20) - 10,
+                    )
+                };
+                let candidate = body_pos.offset(offset);
+                if has_no_blocks_above(tick, &candidate) {
+                    tick.brain.set(
+                        types::WALK_TARGET,
+                        WalkTarget::from_vec(
+                            Vector3::new(
+                                f64::from(candidate.0.x) + 0.5,
+                                f64::from(candidate.0.y),
+                                f64::from(candidate.0.z) + 0.5,
+                            ),
+                            speed_modifier,
+                            0,
+                        ),
+                    );
+                    break;
+                }
+            }
+            true
+        },
+    )
+}
+
+/// Vanilla `CelebrateVillagersSurvivedRaid`, without the fireworks: Pumpkin's rocket entity
+/// cannot carry the firework item that gives the explosion its colour yet.
+pub struct CelebrateVillagersSurvivedRaid {
+    duration: i32,
+    current_raid: Option<i32>,
+}
+
+impl CelebrateVillagersSurvivedRaid {
+    #[must_use]
+    pub const fn new(duration: i32) -> Self {
+        Self {
+            duration,
+            current_raid: None,
+        }
+    }
+}
+
+impl Behavior for CelebrateVillagersSurvivedRaid {
+    fn entry_conditions(&self) -> &[(MemoryModuleId, MemoryStatus)] {
+        &[]
+    }
+
+    fn min_duration(&self) -> i32 {
+        self.duration
+    }
+
+    fn max_duration(&self) -> i32 {
+        self.duration
+    }
+
+    fn check_extra_start_conditions(&mut self, tick: &mut BrainTick<'_>) -> bool {
+        let test_pos = tick.mob.get_entity().block_pos.load();
+        let raid = raid_at(tick.world, &test_pos);
+        self.current_raid = raid.map(|raid| raid.id);
+        raid.is_some_and(|raid| raid.victory) && has_no_blocks_above(tick, &test_pos)
+    }
+
+    fn can_still_use(&mut self, tick: &BrainTick<'_>) -> bool {
+        self.current_raid.is_some_and(|id| {
+            tick.world
+                .raids
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(id)
+                .is_some_and(|raid| !raid.is_stopped())
+        })
+    }
+
+    fn tick(&mut self, tick: &mut BrainTick<'_>) {
+        if tick.mob.get_random().random_range(0..100) == 0 {
+            tick.mob
+                .get_entity()
+                .play_sound(pumpkin_data::sound::Sound::EntityVillagerCelebrate);
+        }
+    }
+
+    fn stop(&mut self, tick: &mut BrainTick<'_>) {
+        self.current_raid = None;
+        tick.brain
+            .update_activity_from_schedule(tick.world, tick.time);
+    }
+
+    fn debug_name(&self) -> &'static str {
+        "CelebrateVillagersSurvivedRaid"
+    }
+}
+
+/// Vanilla `LocateHidingPlace`: runs for a bed right here, else any bed around, else its own.
+#[must_use]
+pub fn locate_hiding_place(radius: i32, speed_modifier: f32, close_enough_dist: i32) -> OneShot {
+    OneShot::new(
+        "LocateHidingPlace",
+        vec![
+            (types::WALK_TARGET.id(), MemoryStatus::ValueAbsent),
+            (types::HOME.id(), MemoryStatus::Registered),
+            (types::HIDING_PLACE.id(), MemoryStatus::Registered),
+            (types::PATH.id(), MemoryStatus::Registered),
+            (types::LOOK_TARGET.id(), MemoryStatus::Registered),
+            (types::BREED_TARGET.id(), MemoryStatus::Registered),
+            (types::INTERACTION_TARGET.id(), MemoryStatus::Registered),
+        ],
+        move |tick| {
+            let body = tick.mob.get_entity().pos.load();
+            let body_pos = tick.mob.get_entity().block_pos.load();
+            let close_enough = f64::from(close_enough_dist);
+            let is_home = |poi_type| poi_type == PoiType::Home;
+            let poi_manager = &tick.world.poi_manager;
+            // Vanilla `PoiManager.find`: the first match in search order, not the closest.
+            let hiding_place = poi_manager
+                .find_all_with_type(
+                    is_home,
+                    |_| true,
+                    &body_pos,
+                    close_enough_dist + 1,
+                    crate::world::poi_manager::Occupancy::Any,
+                )
+                .first()
+                .map(|(_, pos)| *pos)
+                .filter(|pos| closer_to_center_than(pos, body, close_enough))
+                .or_else(|| {
+                    poi_manager.get_random(
+                        is_home,
+                        |_| true,
+                        crate::world::poi_manager::Occupancy::Any,
+                        &body_pos,
+                        radius,
+                        &mut tick.mob.get_random(),
+                    )
+                })
+                .or_else(|| tick.brain.get(types::HOME).map(|home| home.pos));
+            if let Some(pos) = hiding_place
+                && let Some(global) = global_pos_in(tick.world, pos)
+            {
+                tick.brain.erase(types::PATH.id());
+                tick.brain.erase(types::LOOK_TARGET.id());
+                tick.brain.erase(types::BREED_TARGET.id());
+                tick.brain.erase(types::INTERACTION_TARGET.id());
+                tick.brain.set(types::HIDING_PLACE, global);
+                if !closer_to_center_than(&pos, body, close_enough) {
+                    tick.brain.set(
+                        types::WALK_TARGET,
+                        WalkTarget::from_block_pos(pos, speed_modifier, close_enough_dist),
+                    );
+                }
+            }
+            true
+        },
+    )
+}
+
+/// Vanilla `SetHiddenState`: stays hidden for `seconds`, or gives up 15 seconds after the bell,
+/// then goes back to the schedule.
+#[must_use]
+pub fn set_hidden_state(seconds: i32, close_enough_dist: i32) -> OneShot {
+    const HIDE_TIMEOUT: i64 = 300;
+    let stay_hidden_ticks = seconds * 20;
+    let mut ticks_hidden = 0;
+    OneShot::new(
+        "SetHiddenState",
+        vec![
+            (types::HIDING_PLACE.id(), MemoryStatus::ValuePresent),
+            (types::HEARD_BELL_TIME.id(), MemoryStatus::ValuePresent),
+        ],
+        move |tick| {
+            let (Some(time_triggered), Some(hiding_place)) = (
+                tick.brain.get(types::HEARD_BELL_TIME).copied(),
+                tick.brain.get(types::HIDING_PLACE).copied(),
+            ) else {
+                return false;
+            };
+            let timed_out_trying_to_hide = time_triggered + HIDE_TIMEOUT <= tick.time;
+            if ticks_hidden <= stay_hidden_ticks && !timed_out_trying_to_hide {
+                if hiding_place
+                    .pos
+                    .squared_distance(&tick.mob.get_entity().block_pos.load())
+                    < close_enough_dist * close_enough_dist
+                {
+                    ticks_hidden += 1;
+                }
+            } else {
+                tick.brain.erase(types::HEARD_BELL_TIME.id());
+                tick.brain.erase(types::HIDING_PLACE.id());
+                tick.brain
+                    .update_activity_from_schedule(tick.world, tick.time);
+                ticks_hidden = 0;
+            }
+            true
+        },
+    )
+}

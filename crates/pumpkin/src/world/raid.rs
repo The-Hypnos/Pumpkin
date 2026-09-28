@@ -180,6 +180,18 @@ impl Raid {
     }
 
     #[must_use]
+    pub const fn has_first_wave_spawned(&self) -> bool {
+        self.groups_spawned > 0
+    }
+
+    #[must_use]
+    pub fn is_between_waves(&self) -> bool {
+        self.has_first_wave_spawned()
+            && self.get_total_raiders_alive() == 0
+            && self.raid_cooldown_ticks > 0
+    }
+
+    #[must_use]
     pub const fn get_groups_spawned(&self) -> i32 {
         self.groups_spawned
     }

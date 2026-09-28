@@ -2453,13 +2453,20 @@ impl Mob for VillagerEntity {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
+        let world = self.get_entity().world.load();
         if let Some(player_uuid) = last_traded_player {
             self.on_reputation_event_from(ReputationEventType::Trade, player_uuid);
-            self.get_entity().world.load().send_entity_status(
+            world.send_entity_status(
                 self.get_entity(),
                 EntityStatus::VillagerHappy,
                 Some(ActorEventID::VillagerHappy),
             );
+        }
+        if self.get_random().random_range(0..100) == 0
+            && behaviors::raid_at(&world, &self.get_entity().block_pos.load())
+                .is_some_and(|raid| raid.active && !raid.over)
+        {
+            world.send_entity_status(self.get_entity(), EntityStatus::VillagerSweat, None);
         }
     }
 

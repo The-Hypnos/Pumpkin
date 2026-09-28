@@ -17,16 +17,19 @@ use crate::entity::mob::Mob;
 use crate::world::World;
 use crate::world::poi_manager::PoiType;
 
+use crate::entity::ai::brain::behavior::one_shot::sequence;
+
 use super::behaviors::{
-    GiveGiftToHero, GoToPotentialJobSite, HarvestFarmland, JumpOnBed,
-    LookAndFollowTradingPlayerSink, ShowTradesToPlayer, SleepInBed, TradeWithVillager, UseBonemeal,
-    VillagerMakeLove, VillagerPanicTrigger, WorkAtPoi, assign_profession_from_job_site,
-    can_acquire_job_site, go_to_closest_village, holds_job_site, inside_brownian_walk,
-    play_tag_with_other_kids, poi_competitor_scan, reset_profession,
-    set_closest_home_as_walk_target, set_walk_target_from_block_memory, socialize_at_bell,
-    stroll_to_poi_list, update_activity_from_schedule, validate_nearby_poi,
-    village_bound_random_stroll, village_bound_random_stroll_with_range, villager_calm_down,
-    wake_up, yield_job_site,
+    CelebrateVillagersSurvivedRaid, GiveGiftToHero, GoToPotentialJobSite, HarvestFarmland,
+    JumpOnBed, LookAndFollowTradingPlayerSink, ShowTradesToPlayer, SleepInBed, TradeWithVillager,
+    UseBonemeal, VillagerMakeLove, VillagerPanicTrigger, WorkAtPoi,
+    assign_profession_from_job_site, can_acquire_job_site, go_to_closest_village, holds_job_site,
+    inside_brownian_walk, locate_hiding_place, move_to_sky_seeing_spot, play_tag_with_other_kids,
+    poi_competitor_scan, raid_at, react_to_bell, reset_profession, reset_raid_status, ring_bell,
+    set_closest_home_as_walk_target, set_hidden_state, set_raid_status,
+    set_walk_target_from_block_memory, socialize_at_bell, stroll_to_poi_list,
+    update_activity_from_schedule, validate_nearby_poi, village_bound_random_stroll,
+    village_bound_random_stroll_with_range, villager_calm_down, wake_up, yield_job_site,
 };
 use super::{VillagerEntity, VillagerProfession, as_villager};
 
@@ -57,6 +60,8 @@ fn get_core_package(profession: VillagerProfession, speed_modifier: f32) -> Pack
         ),
         (0, Box::new(Timed::new(VillagerPanicTrigger))),
         (0, Box::new(wake_up())),
+        (0, Box::new(react_to_bell())),
+        (0, Box::new(set_raid_status())),
         (
             0,
             Box::new(validate_nearby_poi(
@@ -446,6 +451,88 @@ fn get_panic_package(speed_modifier: f32) -> Package {
     ]
 }
 
+fn get_pre_raid_package(speed_modifier: f32) -> Package {
+    vec![
+        (0, Box::new(ring_bell())),
+        (
+            0,
+            Box::new(behavior::trigger_one_shuffled_of(
+                "TriggerGate",
+                vec![
+                    (
+                        set_walk_target_from_block_memory(
+                            types::MEETING_POINT,
+                            speed_modifier * 1.5,
+                            2,
+                            150,
+                            200,
+                        ),
+                        6,
+                    ),
+                    (village_bound_random_stroll(speed_modifier * 1.5), 2),
+                ],
+            )),
+        ),
+        get_minimal_look_behavior(),
+        (99, Box::new(reset_raid_status())),
+    ]
+}
+
+/// Vanilla `raidExistsAndNotVictory`, which despite its name wants a won raid.
+fn raid_exists_and_not_victory(tick: &mut BrainTick<'_>) -> bool {
+    raid_at(tick.world, &tick.mob.get_entity().block_pos.load()).is_some_and(|raid| raid.victory)
+}
+
+/// Vanilla `raidExistsAndActive`.
+fn raid_exists_and_active(tick: &mut BrainTick<'_>) -> bool {
+    raid_at(tick.world, &tick.mob.get_entity().block_pos.load())
+        .is_some_and(|raid| raid.active && !raid.victory && !raid.loss)
+}
+
+fn get_raid_package(speed_modifier: f32) -> Package {
+    vec![
+        (
+            0,
+            Box::new(sequence(
+                "Sequence",
+                raid_exists_and_not_victory,
+                behavior::trigger_one_shuffled_of(
+                    "TriggerGate",
+                    vec![
+                        (move_to_sky_seeing_spot(speed_modifier), 5),
+                        (village_bound_random_stroll(speed_modifier * 1.1), 2),
+                    ],
+                ),
+            )),
+        ),
+        (
+            0,
+            Box::new(Timed::new(CelebrateVillagersSurvivedRaid::new(600))),
+        ),
+        (
+            2,
+            Box::new(sequence(
+                "Sequence",
+                raid_exists_and_active,
+                locate_hiding_place(24, speed_modifier * 1.4, 1),
+            )),
+        ),
+        get_minimal_look_behavior(),
+        (99, Box::new(reset_raid_status())),
+    ]
+}
+
+fn get_hide_package(speed_modifier: f32) -> Package {
+    vec![
+        (0, Box::new(set_hidden_state(15, 3))),
+        (
+            1,
+            Box::new(locate_hiding_place(32, speed_modifier * 1.25, 2)),
+        ),
+        get_minimal_look_behavior(),
+    ]
+}
+
 fn get_full_look_behavior() -> (i32, Box<dyn BehaviorControl>) {
     let category = |category, weight| -> (Box<dyn BehaviorControl>, i32) {
         (
@@ -547,6 +634,18 @@ fn activities(mob: &dyn Mob) -> Vec<ActivityData> {
     activities.push(ActivityData::with_pairs(
         Activity::Panic,
         get_panic_package(SPEED_MODIFIER),
+    ));
+    activities.push(ActivityData::with_pairs(
+        Activity::PreRaid,
+        get_pre_raid_package(SPEED_MODIFIER),
+    ));
+    activities.push(ActivityData::with_pairs(
+        Activity::Raid,
+        get_raid_package(SPEED_MODIFIER),
+    ));
+    activities.push(ActivityData::with_pairs(
+        Activity::Hide,
+        get_hide_package(SPEED_MODIFIER),
     ));
     activities
 }
