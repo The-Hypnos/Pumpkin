@@ -43,6 +43,12 @@ pub fn is_not_stable(world: &World, pos: &BlockPos) -> bool {
 #[must_use]
 pub fn is_water(world: &World, pos: &BlockPos) -> bool {
     let (_, state_id) = world.get_block_and_state_id(pos);
+    is_water_state(state_id)
+}
+
+/// Whether the state's fluid is water, waterlogged blocks included.
+#[must_use]
+pub fn is_water_state(state_id: pumpkin_data::BlockStateId) -> bool {
     if state_id.to_state().is_waterlogged() {
         return true;
     }

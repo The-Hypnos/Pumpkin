@@ -1,6 +1,7 @@
 use super::super::memory::walk_target::WalkTarget;
 use super::super::memory::{MemoryStatus, types};
 use super::one_shot::OneShot;
+use super::utils::get_random_swimmable_pos;
 use crate::entity::ai::util::land_random_pos;
 
 const MAX_XZ_DIST: i32 = 10;
@@ -13,6 +14,24 @@ pub fn stroll(speed_modifier: f32, may_stroll_from_water: bool) -> OneShot {
         MAX_XZ_DIST,
         MAX_Y_DIST,
         may_stroll_from_water,
+    )
+}
+
+/// Vanilla `RandomStroll.swim`: only while in water, towards a water-pathable spot.
+#[must_use]
+pub fn swim(speed_modifier: f32) -> OneShot {
+    OneShot::new(
+        "RandomSwim",
+        vec![(types::WALK_TARGET.id(), MemoryStatus::ValueAbsent)],
+        move |tick| {
+            if !tick.mob.get_entity().is_in_water() {
+                return false;
+            }
+            let target = get_random_swimmable_pos(tick.mob, MAX_XZ_DIST, MAX_Y_DIST)
+                .map(|pos| WalkTarget::from_vec(pos, speed_modifier, 0));
+            tick.brain.set_optional(types::WALK_TARGET, target);
+            true
+        },
     )
 }
 

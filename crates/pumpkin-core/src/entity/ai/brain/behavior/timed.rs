@@ -5,6 +5,9 @@ use super::super::memory::{MemoryModuleId, MemoryStatus};
 use super::{BehaviorControl, Status, required_memories_of};
 
 pub const DEFAULT_DURATION: i32 = 60;
+/// Duration for behaviors whose vanilla `timedOut` always returns false; one below
+/// `i32::MAX` so the duration roll cannot overflow.
+pub const NO_TIMEOUT: i32 = i32::MAX - 1;
 
 pub trait Behavior: Send + Sync {
     fn entry_conditions(&self) -> &[(MemoryModuleId, MemoryStatus)];

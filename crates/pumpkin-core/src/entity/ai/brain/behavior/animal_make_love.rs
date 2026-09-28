@@ -154,7 +154,7 @@ impl Behavior for AnimalMakeLove {
             && can_mate(tick.mob, partner.as_ref())
             && entity_is_visible(&tick.visibility(), partner.as_ref())
             && tick.time <= self.spawn_child_at_time
-            && !tick.mob.is_panicking()
+            && !tick.brain.has_memory_value(types::IS_PANICKING.id())
             && !partner.is_panicking()
     }
 

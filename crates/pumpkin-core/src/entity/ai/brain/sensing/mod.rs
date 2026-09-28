@@ -5,6 +5,7 @@ use pumpkin_util::math::position::BlockPos;
 use rand::{Rng, RngExt};
 
 use crate::entity::ai::target_predicate::TargetPredicate;
+use crate::entity::passive::frog_ai;
 use crate::entity::{Entity, EntityBase};
 use crate::world::World;
 
@@ -59,6 +60,7 @@ pub enum SensorType {
     FoodTemptations,
     IsInWater,
     HoglinSpecific,
+    FrogTemptations,
 }
 
 impl SensorType {
@@ -78,6 +80,7 @@ impl SensorType {
             Self::FoodTemptations => "minecraft:food_temptations",
             Self::IsInWater => "minecraft:is_in_water",
             Self::HoglinSpecific => "minecraft:hoglin_specific_sensor",
+            Self::FrogTemptations => "minecraft:frog_temptations",
         }
     }
 
@@ -95,7 +98,8 @@ impl SensorType {
             | Self::NearestAdultAnyType
             | Self::FoodTemptations
             | Self::IsInWater
-            | Self::HoglinSpecific => DEFAULT_SCAN_RATE,
+            | Self::HoglinSpecific
+            | Self::FrogTemptations => DEFAULT_SCAN_RATE,
             Self::GolemDetected => GOLEM_SCAN_RATE,
         }
     }
@@ -115,6 +119,7 @@ impl SensorType {
             Self::FoodTemptations => Box::new(TemptingSensor::for_animal()),
             Self::IsInWater => Box::new(IsInWaterSensor),
             Self::HoglinSpecific => Box::new(HoglinSpecificSensor),
+            Self::FrogTemptations => Box::new(TemptingSensor::new(frog_ai::is_temptation)),
         }
     }
 
@@ -228,7 +233,7 @@ pub fn find_nearest_block_state(
 }
 
 /// First position matching `predicate`, in vanilla `BlockPos.withinBoxByManhattanDistance` order.
-fn find_first_in_box_by_manhattan_distance(
+pub fn find_first_in_box_by_manhattan_distance(
     center: BlockPos,
     reach_xz: i32,
     reach_y: i32,
