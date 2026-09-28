@@ -1310,6 +1310,11 @@ pub trait Mob: EntityBase + Send + Sync {
         true
     }
 
+    /// Vanilla `Mob.canPickUpLoot`, which some mobs derive from their brain instead of the flag.
+    fn can_pick_up_loot(&self, _brain: &Brain) -> bool {
+        self.get_mob_entity().can_pick_up_loot()
+    }
+
     /// Vanilla `Mob.canUseNonMeleeWeapon`, false unless the mob knows how to fire what it holds.
     fn can_use_non_melee_weapon(&self, _stack: &ItemStack) -> bool {
         false

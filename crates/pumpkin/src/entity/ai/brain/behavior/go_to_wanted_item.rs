@@ -38,7 +38,7 @@ pub fn go_to_wanted_item(
                 .brain
                 .has_memory_value(types::ITEM_PICKUP_COOLDOWN_TICKS.id())
                 || !predicate(tick)
-                || !tick.mob.get_mob_entity().can_pick_up_loot()
+                || !tick.mob.can_pick_up_loot(tick.brain)
             {
                 return false;
             }

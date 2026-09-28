@@ -15,6 +15,14 @@ impl GlobalPos {
     pub const fn new(dimension: &'static Dimension, pos: BlockPos) -> Self {
         Self { dimension, pos }
     }
+
+    /// Vanilla `GlobalPos.isCloseEnough`: same dimension and within a chessboard distance.
+    #[must_use]
+    pub fn is_close_enough(&self, dimension_name: &str, pos: &BlockPos, max_distance: i32) -> bool {
+        let delta = self.pos.0 - pos.0;
+        self.dimension.minecraft_name == dimension_name
+            && delta.x.abs().max(delta.y.abs()).max(delta.z.abs()) <= max_distance
+    }
 }
 
 impl PartialEq for GlobalPos {
