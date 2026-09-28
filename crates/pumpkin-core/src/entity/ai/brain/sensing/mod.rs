@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use pumpkin_data::BlockStateId;
 use pumpkin_util::math::position::BlockPos;
 use rand::{Rng, RngExt};
 
@@ -203,8 +204,31 @@ fn entities_in_inflated_box(
     found.into_iter().map(|(_, entity)| entity).collect()
 }
 
+/// Vanilla `findBlocksInBoxByManhattanDistance(..).filterState(..).findFirst()`.
+///
+/// The palette check skips the block-by-block walk when nothing in range can match, the usual
+/// case, which keeps thousands of scanning mobs cheap.
+pub fn find_nearest_block_state(
+    world: &World,
+    center: BlockPos,
+    reach_xz: i32,
+    reach_y: i32,
+    predicate: impl Fn(BlockStateId) -> bool,
+) -> Option<BlockPos> {
+    let min = center.add(-reach_xz, -reach_y, -reach_xz);
+    let max = center.add(reach_xz, reach_y, reach_xz);
+    if !world.may_contain_block_state(min, max, &predicate) {
+        return None;
+    }
+    find_first_in_box_by_manhattan_distance(center, reach_xz, reach_y, |pos| {
+        world
+            .get_block_state_id_if_loaded(pos)
+            .is_some_and(&predicate)
+    })
+}
+
 /// First position matching `predicate`, in vanilla `BlockPos.withinBoxByManhattanDistance` order.
-pub fn find_first_in_box_by_manhattan_distance(
+fn find_first_in_box_by_manhattan_distance(
     center: BlockPos,
     reach_xz: i32,
     reach_y: i32,

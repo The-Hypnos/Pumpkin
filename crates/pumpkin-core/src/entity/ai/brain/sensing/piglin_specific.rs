@@ -3,7 +3,7 @@ use std::sync::Arc;
 use pumpkin_data::block_properties::CampfireLikeProperties;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::{Block, BlockDirection};
+use pumpkin_data::{Block, BlockDirection, BlockStateId};
 use pumpkin_util::math::position::BlockPos;
 
 use crate::entity::EntityBase;
@@ -12,7 +12,7 @@ use crate::world::World;
 
 use super::super::BrainTick;
 use super::super::memory::{MemoryModuleId, NearestVisibleLivingEntities, types};
-use super::{Sensor, find_first_in_box_by_manhattan_distance};
+use super::{Sensor, find_nearest_block_state};
 
 const REPELLENT_DETECTION_RANGE_HORIZONTAL: i32 = 8;
 const REPELLENT_DETECTION_RANGE_VERTICAL: i32 = 4;
@@ -173,16 +173,17 @@ fn scan_visible(tick: &BrainTick<'_>) -> Scan {
 }
 
 fn find_nearest_repellent(world: &World, center: BlockPos) -> Option<BlockPos> {
-    find_first_in_box_by_manhattan_distance(
+    find_nearest_block_state(
+        world,
         center,
         REPELLENT_DETECTION_RANGE_HORIZONTAL,
         REPELLENT_DETECTION_RANGE_VERTICAL,
-        |pos| is_valid_repellent(world, pos),
+        is_valid_repellent,
     )
 }
 
-fn is_valid_repellent(world: &World, pos: &BlockPos) -> bool {
-    let (block, state_id) = world.get_block_and_state_id(pos);
+fn is_valid_repellent(state_id: BlockStateId) -> bool {
+    let block = Block::from_state_id(state_id);
     if !block.has_tag(&tag::Block::MINECRAFT_PIGLIN_REPELLENTS) {
         return false;
     }

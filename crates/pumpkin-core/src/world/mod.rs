@@ -5850,6 +5850,33 @@ impl World {
         })?
     }
 
+    /// Whether any loaded chunk section overlapping `min..=max` holds a block state matching
+    /// `predicate`. Reads section palettes only, so it is cheap and never misses a match, but
+    /// can report one the box itself does not contain.
+    #[must_use]
+    pub fn may_contain_block_state(
+        &self,
+        min: BlockPos,
+        max: BlockPos,
+        predicate: impl Fn(BlockStateId) -> bool,
+    ) -> bool {
+        for chunk_x in (min.0.x >> 4)..=(max.0.x >> 4) {
+            for chunk_z in (min.0.z >> 4)..=(max.0.z >> 4) {
+                let found = self
+                    .level
+                    .read_chunk_sync(&Vector2::new(chunk_x, chunk_z), |chunk| {
+                        chunk
+                            .section
+                            .any_block_in_y_range(min.0.y, max.0.y, &predicate)
+                    });
+                if found == Some(true) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     #[must_use]
     pub fn get_block_state_if_loaded(&self, position: &BlockPos) -> Option<&'static BlockState> {
         self.get_block_state_id_if_loaded(position)
