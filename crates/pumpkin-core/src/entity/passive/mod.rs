@@ -5,6 +5,7 @@ pub mod axolotl;
 pub mod axolotl_ai;
 pub mod bee;
 pub mod camel;
+pub mod camel_ai;
 pub mod cat;
 pub mod chicken;
 pub mod cod;
