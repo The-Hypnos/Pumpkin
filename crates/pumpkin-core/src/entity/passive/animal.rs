@@ -23,6 +23,12 @@ pub trait Animal: Mob {
         spawn_child_from_breeding(tick.mob, mate);
     }
 
+    /// Extra conditions from a vanilla `canMate` override. The base check (another animal of the
+    /// same type, both in love) runs in the brain's `AnimalMakeLove`.
+    fn can_mate(&self, _partner: &dyn EntityBase) -> bool {
+        true
+    }
+
     /// Animals prefer grass, then bright spots.
     fn animal_walk_target_value(&self, pos: &pumpkin_util::math::position::BlockPos) -> f32 {
         let world = self.get_mob_entity().living_entity.entity.world.load();
