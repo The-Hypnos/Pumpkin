@@ -49,11 +49,17 @@ pub fn is_water(world: &World, pos: &BlockPos) -> bool {
 /// Whether the state's fluid is water, waterlogged blocks included.
 #[must_use]
 pub fn is_water_state(state_id: pumpkin_data::BlockStateId) -> bool {
+    fluid_has_tag(state_id, &tag::Fluid::MINECRAFT_WATER)
+}
+
+/// Whether the state's fluid is in `fluid_tag`; a waterlogged block holds water.
+#[must_use]
+pub fn fluid_has_tag(state_id: pumpkin_data::BlockStateId, fluid_tag: &'static tag::Tag) -> bool {
     if state_id.to_state().is_waterlogged() {
-        return true;
+        return pumpkin_data::fluid::Fluid::WATER.has_tag(fluid_tag);
     }
     pumpkin_data::fluid::Fluid::from_state_id(state_id)
-        .is_some_and(|fluid| fluid.has_tag(&tag::Fluid::MINECRAFT_WATER))
+        .is_some_and(|fluid| fluid.has_tag(fluid_tag))
 }
 
 /// Takes the navigation lock, so callers must not already hold it.

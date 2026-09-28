@@ -14,6 +14,7 @@ use super::{BrainTick, VisibilityContext};
 
 pub mod adult;
 pub mod dummy;
+pub mod frog_attackables;
 pub mod golem;
 pub mod hoglin_specific;
 pub mod hurt_by;
@@ -27,6 +28,7 @@ pub mod tempting;
 
 pub use adult::{AdultSensor, AdultSensorAnyType};
 pub use dummy::DummySensor;
+pub use frog_attackables::FrogAttackablesSensor;
 pub use golem::{GOLEM_SCAN_RATE, GolemSensor};
 pub use hoglin_specific::HoglinSpecificSensor;
 pub use hurt_by::HurtBySensor;
@@ -61,6 +63,7 @@ pub enum SensorType {
     IsInWater,
     HoglinSpecific,
     FrogTemptations,
+    FrogAttackables,
 }
 
 impl SensorType {
@@ -81,6 +84,7 @@ impl SensorType {
             Self::IsInWater => "minecraft:is_in_water",
             Self::HoglinSpecific => "minecraft:hoglin_specific_sensor",
             Self::FrogTemptations => "minecraft:frog_temptations",
+            Self::FrogAttackables => "minecraft:frog_attackables",
         }
     }
 
@@ -99,7 +103,8 @@ impl SensorType {
             | Self::FoodTemptations
             | Self::IsInWater
             | Self::HoglinSpecific
-            | Self::FrogTemptations => DEFAULT_SCAN_RATE,
+            | Self::FrogTemptations
+            | Self::FrogAttackables => DEFAULT_SCAN_RATE,
             Self::GolemDetected => GOLEM_SCAN_RATE,
         }
     }
@@ -120,6 +125,7 @@ impl SensorType {
             Self::IsInWater => Box::new(IsInWaterSensor),
             Self::HoglinSpecific => Box::new(HoglinSpecificSensor),
             Self::FrogTemptations => Box::new(TemptingSensor::new(frog_ai::is_temptation)),
+            Self::FrogAttackables => Box::new(FrogAttackablesSensor),
         }
     }
 
@@ -263,6 +269,22 @@ pub fn find_first_in_box_by_manhattan_distance(
         }
     }
     None
+}
+
+/// Vanilla `NearestVisibleLivingEntitySensor.doTick`: stores the nearest visible entity
+/// matching `is_matching` in `memory`, or erases it.
+pub fn set_nearest_visible_matching(
+    tick: &mut BrainTick<'_>,
+    memory: super::memory::MemoryModuleType<Arc<dyn EntityBase>>,
+    is_matching: impl Fn(&VisibilityContext<'_>, &Arc<dyn EntityBase>) -> bool,
+) {
+    let nearest = {
+        let ctx = tick.visibility();
+        ctx.brain
+            .get(types::NEAREST_VISIBLE_LIVING_ENTITIES)
+            .and_then(|visible| visible.find_closest(&ctx, |entity| is_matching(&ctx, entity)))
+    };
+    tick.brain.set_optional(memory, nearest);
 }
 
 fn is_current_attack_target(ctx: &VisibilityContext<'_>, target: &dyn EntityBase) -> bool {

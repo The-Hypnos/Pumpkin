@@ -105,6 +105,9 @@ pub struct LivingEntity {
 
     pub climbing: AtomicBool,
 
+    /// Vanilla `discardFriction`: airborne movement keeps its speed, as in a long jump.
+    pub discard_friction: AtomicBool,
+
     /// The position where the entity was last climbing, used for death messages
     pub climbing_pos: AtomicCell<Option<BlockPos>>,
 
@@ -299,6 +302,7 @@ impl LivingEntity {
             jumping: AtomicBool::new(false),
             jumping_cooldown: AtomicU8::new(0),
             climbing: AtomicBool::new(false),
+            discard_friction: AtomicBool::new(false),
             climbing_pos: AtomicCell::new(None),
             last_attacker_id: AtomicI32::new(0),
             last_attacked_time: AtomicI32::new(0),
@@ -1563,7 +1567,10 @@ impl LivingEntity {
             // if below world's bottom y then -0.1, else 0.0
         }
 
-        // If entity has no drag: store velo and return
+        if self.discard_friction.load(Relaxed) {
+            self.entity.velocity.store(velo);
+            return;
+        }
 
         velo.x *= friction;
 
@@ -1825,10 +1832,13 @@ impl LivingEntity {
     fn get_jump_velocity(&self, mut strength: f64) -> f64 {
         strength *= self.get_attribute_value(&Attributes::JUMP_STRENGTH);
         strength *= f64::from(self.entity.get_jump_velocity_multiplier());
-        if let Some(effect) = self.get_effect(&StatusEffect::JUMP_BOOST) {
-            strength += 0.1 * f64::from(effect.amplifier + 1);
-        }
-        strength
+        strength + self.get_jump_boost_power()
+    }
+
+    /// Vanilla `LivingEntity.getJumpBoostPower`.
+    pub fn get_jump_boost_power(&self) -> f64 {
+        self.get_effect(&StatusEffect::JUMP_BOOST)
+            .map_or(0.0, |effect| 0.1 * f64::from(effect.amplifier + 1))
     }
 
     pub fn fall(
