@@ -23,6 +23,7 @@ use tracing::{debug, error, info, trace, warn};
 mod active_chunks;
 pub mod brightness;
 pub mod chunker;
+pub mod entity_grid;
 pub mod explosion;
 pub mod generation_cache;
 pub mod loot;
@@ -259,6 +260,8 @@ pub struct World {
     /// A map of active entities within the world, keyed by their unique UUID.
     /// This does not include players.
     pub entities: ArcSwap<Vec<Arc<dyn EntityBase>>>,
+    /// Entities and players by chunk, rebuilt at the start of each entity tick.
+    pub entity_grid: ArcSwap<entity_grid::EntityGrid>,
     /// The world's scoreboard, used for tracking scores, objectives, and display information.
     pub scoreboard: std::sync::Mutex<Scoreboard>,
     /// The world's worldborder, defining the playable area and controlling its expansion or contraction.
@@ -402,6 +405,7 @@ impl World {
             level_info,
             players: ArcSwap::new(Arc::new(Vec::new())),
             entities: ArcSwap::new(Arc::new(Vec::new())),
+            entity_grid: ArcSwap::new(Arc::new(entity_grid::EntityGrid::default())),
             scoreboard: std::sync::Mutex::new(Scoreboard::default()),
             worldborder: std::sync::Mutex::new(Worldborder::new(
                 0.0,
@@ -1594,6 +1598,14 @@ impl World {
         let entity_handle = handle.clone();
 
         let t_entities = std::time::Instant::now();
+        let player_entities: Vec<Arc<dyn EntityBase>> = players
+            .iter()
+            .map(|player| Arc::clone(player) as Arc<dyn EntityBase>)
+            .collect();
+        self.entity_grid
+            .store(Arc::new(entity_grid::EntityGrid::build(
+                entities_to_tick.iter().chain(player_entities.iter()),
+            )));
         let tickable: Vec<_> = entities_to_tick
             .par_iter()
             .filter_map(|entity| {

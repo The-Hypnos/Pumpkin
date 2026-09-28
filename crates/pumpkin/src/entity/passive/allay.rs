@@ -175,7 +175,12 @@ impl AllayEntity {
             return;
         }
         let reach = entity.bounding_box.load().expand(1.0, 1.0, 1.0);
-        let candidates = world.get_entities_at_box(&reach);
+        let mut candidates = Vec::new();
+        world.entity_grid.load().for_each_in_box(&reach, |entity| {
+            if entity.get_item_entity().is_some() {
+                candidates.push(Arc::clone(entity));
+            }
+        });
         if candidates.is_empty() {
             return;
         }
