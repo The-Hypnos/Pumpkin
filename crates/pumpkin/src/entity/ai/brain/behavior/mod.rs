@@ -1,6 +1,7 @@
 use super::BrainTick;
 use super::memory::MemoryModuleId;
 
+pub mod acquire_poi;
 pub mod animal_make_love;
 pub mod animal_panic;
 pub mod baby_follow_adult;
@@ -49,6 +50,7 @@ pub mod try_find_land;
 pub mod try_lay_spawn_on_fluid_near_land;
 pub mod utils;
 
+pub use acquire_poi::acquire_poi;
 pub use animal_make_love::AnimalMakeLove;
 pub use animal_panic::AnimalPanic;
 pub use baby_follow_adult::{baby_follow, baby_follow_adult};

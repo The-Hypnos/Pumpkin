@@ -377,12 +377,13 @@ impl PoiManager {
         count
     }
 
-    /// Vanilla `findAllClosestFirstWithType`.
+    /// Vanilla `findAllWithType`. `filter` sees every candidate once, in search order, as the
+    /// stateful filters vanilla passes here expect.
     #[must_use]
-    pub fn find_all_closest_first_with_type(
+    pub fn find_all_with_type(
         &self,
         predicate: impl Fn(PoiType) -> bool,
-        filter: impl Fn(&BlockPos) -> bool,
+        mut filter: impl FnMut(&BlockPos) -> bool,
         center: &BlockPos,
         radius: i32,
         occupancy: Occupancy,
@@ -394,6 +395,20 @@ impl PoiManager {
             }
             false
         });
+        found
+    }
+
+    /// Vanilla `findAllClosestFirstWithType`.
+    #[must_use]
+    pub fn find_all_closest_first_with_type(
+        &self,
+        predicate: impl Fn(PoiType) -> bool,
+        filter: impl FnMut(&BlockPos) -> bool,
+        center: &BlockPos,
+        radius: i32,
+        occupancy: Occupancy,
+    ) -> Vec<(PoiType, BlockPos)> {
+        let mut found = self.find_all_with_type(predicate, filter, center, radius, occupancy);
         found.sort_by_key(|(_, pos)| dist_sqr(pos, center));
         found
     }
