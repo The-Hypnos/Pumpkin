@@ -68,6 +68,7 @@ impl MoveControlTrait for FlyingMoveControl {
                 (self.speed_modifier * flying_speed) as f32
             };
 
+            living_entity.set_speed(f64::from(speed));
             let sd = xd.hypot(zd);
             if yd.abs() > 1.0E-5 || sd > 1.0E-5 {
                 let x_rot_d = -((yd.atan2(sd).to_degrees()) as f32);
