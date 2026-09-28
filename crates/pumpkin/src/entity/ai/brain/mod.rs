@@ -125,6 +125,10 @@ impl Brain {
         self.memories.get(key)
     }
 
+    pub fn get_mut<T: MemoryValue>(&mut self, key: MemoryModuleType<T>) -> Option<&mut T> {
+        self.memories.get_mut(key)
+    }
+
     pub fn set<T: MemoryValue>(&mut self, key: MemoryModuleType<T>, value: T) {
         self.memories.set(key, value);
     }
