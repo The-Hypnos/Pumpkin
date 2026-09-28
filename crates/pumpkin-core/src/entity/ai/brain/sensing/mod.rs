@@ -22,12 +22,16 @@ pub mod hoglin_specific;
 pub mod hurt_by;
 pub mod is_in_water;
 pub mod mob_sensor;
+pub mod nearest_bed;
 pub mod nearest_items;
 pub mod nearest_living_entities;
 pub mod nearest_players;
 pub mod piglin_brute_specific;
 pub mod piglin_specific;
+pub mod secondary_poi;
 pub mod tempting;
+pub mod villager_babies;
+pub mod villager_hostiles;
 
 pub use adult::{AdultSensor, AdultSensorAnyType};
 pub use axolotl_attackables::AxolotlAttackablesSensor;
@@ -39,12 +43,16 @@ pub use hoglin_specific::HoglinSpecificSensor;
 pub use hurt_by::HurtBySensor;
 pub use is_in_water::IsInWaterSensor;
 pub use mob_sensor::MobSensor;
+pub use nearest_bed::{NEAREST_BED_SCAN_RATE, NearestBedSensor};
 pub use nearest_items::NearestItemSensor;
 pub use nearest_living_entities::NearestLivingEntitySensor;
 pub use nearest_players::PlayerSensor;
 pub use piglin_brute_specific::PiglinBruteSpecificSensor;
 pub use piglin_specific::PiglinSpecificSensor;
+pub use secondary_poi::{SECONDARY_POI_SCAN_RATE, SecondaryPoiSensor};
 pub use tempting::TemptingSensor;
+pub use villager_babies::VillagerBabiesSensor;
+pub use villager_hostiles::VillagerHostilesSensor;
 
 pub const DEFAULT_SCAN_RATE: i32 = 20;
 
@@ -79,6 +87,10 @@ pub enum SensorType {
     ArmadilloScareDetected,
     NautilusTemptations,
     BreezeAttackEntity,
+    NearestBed,
+    VillagerHostiles,
+    VillagerBabies,
+    SecondaryPois,
 }
 
 impl SensorType {
@@ -104,6 +116,10 @@ impl SensorType {
             Self::ArmadilloScareDetected => "minecraft:armadillo_scare_detected",
             Self::NautilusTemptations => "minecraft:nautilus_temptations",
             Self::BreezeAttackEntity => "minecraft:breeze_attack_entity_sensor",
+            Self::NearestBed => "minecraft:nearest_bed",
+            Self::VillagerHostiles => "minecraft:villager_hostiles",
+            Self::VillagerBabies => "minecraft:villager_babies",
+            Self::SecondaryPois => "minecraft:secondary_pois",
         }
     }
 
@@ -126,7 +142,11 @@ impl SensorType {
             | Self::FrogAttackables
             | Self::AxolotlAttackables
             | Self::NautilusTemptations
-            | Self::BreezeAttackEntity => DEFAULT_SCAN_RATE,
+            | Self::BreezeAttackEntity
+            | Self::VillagerHostiles
+            | Self::VillagerBabies => DEFAULT_SCAN_RATE,
+            Self::NearestBed => NEAREST_BED_SCAN_RATE,
+            Self::SecondaryPois => SECONDARY_POI_SCAN_RATE,
             Self::GolemDetected => GOLEM_SCAN_RATE,
             Self::ArmadilloScareDetected => armadillo_ai::SCARE_SCAN_RATE,
         }
@@ -159,6 +179,10 @@ impl SensorType {
             )),
             Self::NautilusTemptations => Box::new(TemptingSensor::new(nautilus_ai::is_temptation)),
             Self::BreezeAttackEntity => Box::new(BreezeAttackEntitySensor),
+            Self::NearestBed => Box::new(NearestBedSensor::default()),
+            Self::VillagerHostiles => Box::new(VillagerHostilesSensor),
+            Self::VillagerBabies => Box::new(VillagerBabiesSensor),
+            Self::SecondaryPois => Box::new(SecondaryPoiSensor),
         }
     }
 

@@ -520,6 +520,14 @@ impl VillagerEntity {
         mob_arc
     }
 
+    #[must_use]
+    pub fn profession(&self) -> VillagerProfession {
+        self.villager_data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .profession_enum()
+    }
+
     pub fn count_food_points_in_inventory(&self) -> i32 {
         let inventory = self
             .inventory
