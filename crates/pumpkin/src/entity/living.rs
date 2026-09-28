@@ -97,6 +97,8 @@ pub struct LivingEntity {
     pub entity_equipment: Arc<std::sync::Mutex<EntityEquipment>>,
     pub equipment_drop_chances: Arc<std::sync::Mutex<FxHashMap<EquipmentSlot, f32>>>,
     pub movement_input: AtomicCell<Vector3<f64>>,
+    /// Vanilla `LivingEntity.speed`: how fast a mob walks, set by whatever is moving it.
+    pub speed: AtomicCell<f64>,
     pub equipment_slots: Arc<FxHashMap<usize, EquipmentSlot>>,
 
     pub jumping: AtomicBool,
@@ -312,6 +314,7 @@ impl LivingEntity {
             last_hurt_by_mob_id: AtomicI32::new(0),
             last_hurt_by_mob_time: AtomicI64::new(0),
             movement_input: AtomicCell::new(Vector3::default()),
+            speed: AtomicCell::new(0.0),
             water_movement_speed_multiplier,
             last_block_pos: AtomicCell::new(None),
             equipment_attribute_modifier_ids: std::sync::Mutex::new(FxHashMap::default()),
@@ -1503,10 +1506,28 @@ impl LivingEntity {
         self.entity.velocity.store(velo);
     }
 
+    /// Vanilla `Mob.setSpeed`: the walking speed, which a mob also takes as its forward input.
+    pub fn set_speed(&self, speed: f64) {
+        self.speed.store(speed);
+        let mut input = self.movement_input.load();
+        input.z = speed;
+        self.movement_input.store(input);
+    }
+
+    /// Vanilla `getSpeed`: a player walks at its attribute speed, set in `Player.aiStep`, and a mob
+    /// at the speed its movement last set.
+    fn movement_speed(&self, caller: &dyn EntityBase) -> f64 {
+        if caller.get_player().is_some() {
+            self.get_attribute_value(&Attributes::MOVEMENT_SPEED)
+        } else {
+            self.speed.load()
+        }
+    }
+
     fn travel_in_air(&self, caller: &dyn EntityBase) {
         // applyMovementInput
 
-        let effective_speed = self.get_attribute_value(&Attributes::MOVEMENT_SPEED);
+        let effective_speed = self.movement_speed(caller);
 
         let (speed, friction) = if self.entity.on_ground.load(Relaxed) {
             // getVelocityAffectingPos
@@ -1585,7 +1606,7 @@ impl LivingEntity {
 
         let falling = self.entity.velocity.load().y <= 0.0;
         let gravity = self.get_effective_gravity(caller);
-        let effective_speed = self.get_attribute_value(&Attributes::MOVEMENT_SPEED);
+        let effective_speed = self.movement_speed(caller);
 
         if water {
             let mut friction = if self.entity.sprinting.load(Relaxed) {

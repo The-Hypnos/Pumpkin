@@ -90,7 +90,8 @@ impl MoveControlTrait for SmoothSwimmingMoveControl {
             let speed = (self.speed_modifier * movement_speed) as f32;
 
             if entity.touching_water.load(Ordering::Relaxed) {
-                let water_speed = speed * self.in_water_speed_modifier;
+                // Vanilla scales the speed but steers with the unscaled input.
+                living_entity.set_speed(f64::from(speed * self.in_water_speed_modifier));
                 let sqrt = xd.hypot(zd);
                 if yd.abs() > 1.0E-5 || sqrt > 1.0E-5 {
                     let mut x_rot_d = -((yd.atan2(sqrt).to_degrees()) as f32);
@@ -106,18 +107,18 @@ impl MoveControlTrait for SmoothSwimmingMoveControl {
                 let sin = pitch_rad.sin();
                 living_entity.movement_input.store(Vector3::new(
                     0.0,
-                    -(sin * water_speed) as f64,
-                    (cos * water_speed) as f64,
+                    f64::from(-(sin * speed)),
+                    f64::from(cos * speed),
                 ));
             } else {
                 let left_to_turn = wrap_degrees(entity.yaw.load() - y_rot_d).abs();
                 let factor = Self::get_turning_speed_factor(left_to_turn);
-                let land_speed = speed * self.outside_water_speed_modifier * factor;
-                living_entity
-                    .movement_input
-                    .store(Vector3::new(0.0, 0.0, land_speed as f64));
+                living_entity.set_speed(f64::from(
+                    speed * self.outside_water_speed_modifier * factor,
+                ));
             }
         } else {
+            living_entity.speed.store(0.0);
             living_entity
                 .movement_input
                 .store(Vector3::new(0.0, 0.0, 0.0));

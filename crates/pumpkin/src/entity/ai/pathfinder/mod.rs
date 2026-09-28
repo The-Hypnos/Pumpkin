@@ -1133,9 +1133,7 @@ impl PathNavigation {
                 let mob_speed =
                     goal.speed * entity.get_attribute_value(&Attributes::MOVEMENT_SPEED);
 
-                entity
-                    .movement_input
-                    .store(Vector3::new(0.0, 0.0, mob_speed));
+                entity.set_speed(mob_speed);
 
                 let step_height = entity.get_attribute_value(&Attributes::STEP_HEIGHT);
                 let jump_distance = 1.0f64.max(f64::from(self.mob_width));
@@ -1551,6 +1549,7 @@ impl PathNavigationTrait for FlyingPathNavigation {
                 } else {
                     0.0
                 };
+                entity.speed.store(speed);
                 entity
                     .movement_input
                     .store(Vector3::new(0.0, y_input, speed));
@@ -1851,6 +1850,7 @@ impl PathNavigationTrait for WaterBoundPathNavigation {
                 } else {
                     0.0
                 };
+                entity.speed.store(speed);
                 entity
                     .movement_input
                     .store(Vector3::new(0.0, y_input, speed));
@@ -2105,7 +2105,7 @@ impl PathNavigationTrait for WallClimberNavigation {
 
                 let speed = self.inner.inner.speed_modifier
                     * entity.get_attribute_value(&Attributes::MOVEMENT_SPEED);
-                entity.movement_input.store(Vector3::new(0.0, 0.0, speed));
+                entity.set_speed(speed);
                 if dy > 0.0 {
                     entity.jumping.store(true, Ordering::SeqCst);
                 } else {
@@ -2378,6 +2378,7 @@ impl PathNavigationTrait for AmphibiousPathNavigation {
                     } else {
                         0.0
                     };
+                    entity.speed.store(speed);
                     entity
                         .movement_input
                         .store(Vector3::new(0.0, y_input, speed));
