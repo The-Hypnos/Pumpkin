@@ -1300,8 +1300,18 @@ impl Entity {
         }
     }
 
+    /// The size this entity takes in `pose`, vanilla `getDimensions(pose)`.
+    fn dimensions_for_pose(&self, pose: EntityPose) -> EntityDimensions {
+        // Only players change shape with their pose; every living entity shares the sleeping size.
+        if self.entity_type == &EntityType::PLAYER || pose == EntityPose::Sleeping {
+            Self::get_entity_dimensions(pose)
+        } else {
+            Self::type_dimensions(self.entity_type)
+        }
+    }
+
     pub fn get_eye_height(&self) -> f64 {
-        f64::from(Self::get_entity_dimensions(self.pose.load()).eye_height)
+        f64::from(self.entity_dimension.load().eye_height)
     }
 
     /// Updates the entity's position, block position, and chunk position.
@@ -3033,7 +3043,7 @@ impl Entity {
             }
         }
 
-        let dimension = Self::get_entity_dimensions(pose);
+        let dimension = self.dimensions_for_pose(pose);
         let position = self.pos.load();
         let aabb = BoundingBox::new_from_pos(position.x, position.y, position.z, &dimension);
         self.pose.store(pose);
@@ -3892,6 +3902,8 @@ impl Entity {
 
     pub fn reset_state(&self) {
         self.pose.store(EntityPose::Standing);
+        self.entity_dimension
+            .store(self.dimensions_for_pose(EntityPose::Standing));
         self.fall_flying.store(false, Relaxed);
         self.extinguish();
         self.set_on_fire(false);
