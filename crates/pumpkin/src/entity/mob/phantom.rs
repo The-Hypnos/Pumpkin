@@ -49,4 +49,11 @@ impl Mob for PhantomEntity {
     fn get_mob_gravity(&self) -> f64 {
         0.0
     }
+
+    // Vanilla `PhantomBodyRotationControl`.
+    fn tick_head_turn(&self) {
+        let entity = &self.mob_entity.living_entity.entity;
+        entity.head_yaw.store(entity.body_yaw.load());
+        entity.body_yaw.store(entity.yaw.load());
+    }
 }

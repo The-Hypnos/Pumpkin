@@ -409,6 +409,13 @@ impl Mob for CreakingEntity {
         &self.mob_entity
     }
 
+    fn tick_head_turn(&self) {
+        if self.can_move() {
+            self.mob_entity
+                .tick_body_rotation(self.get_max_head_rotation());
+        }
+    }
+
     fn mob_tick(&self, _caller: &dyn EntityBase) {
         let entity = &self.mob_entity.living_entity.entity;
         if !entity.is_alive() {

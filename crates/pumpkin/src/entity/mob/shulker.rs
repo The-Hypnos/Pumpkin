@@ -331,6 +331,9 @@ impl Mob for ShulkerEntity {
         &self.mob_entity
     }
 
+    // Vanilla `ShulkerBodyRotationControl` never turns the body.
+    fn tick_head_turn(&self) {}
+
     fn get_mob_gravity(&self) -> f64 {
         0.0
     }
