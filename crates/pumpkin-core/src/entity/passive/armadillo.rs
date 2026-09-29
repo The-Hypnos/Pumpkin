@@ -323,6 +323,13 @@ impl Mob for ArmadilloEntity {
         &self.mob_entity
     }
 
+    fn tick_head_turn(&self) {
+        if !self.is_scared() {
+            self.mob_entity
+                .tick_body_rotation(self.get_max_head_rotation());
+        }
+    }
+
     fn modify_incoming_damage(&self, amount: f32, _damage_type: DamageType) -> f32 {
         if self.is_scared() {
             (amount - 1.0).max(0.0) / 2.0

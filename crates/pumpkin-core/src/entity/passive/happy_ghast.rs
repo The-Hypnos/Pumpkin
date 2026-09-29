@@ -154,6 +154,17 @@ impl Mob for HappyGhastEntity {
         &self.mob_entity
     }
 
+    fn tick_head_turn(&self) {
+        if self.is_vehicle() {
+            let entity = &self.mob_entity.living_entity.entity;
+            let yaw = entity.yaw.load();
+            entity.head_yaw.store(yaw);
+            entity.body_yaw.store(yaw);
+        }
+        self.mob_entity
+            .tick_body_rotation(self.get_max_head_rotation());
+    }
+
     fn mob_tick(&self, _caller: &dyn EntityBase) {
         self.ageable_ai_step();
 

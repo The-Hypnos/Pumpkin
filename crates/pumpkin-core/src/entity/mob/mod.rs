@@ -2,6 +2,7 @@ use super::{Entity, EntityBase, ai::pathfinder::Navigator, living::LivingEntity}
 use crate::entity::ai::brain::Brain;
 use crate::entity::ai::brain::memory::PackedMemories;
 use crate::entity::ai::control::MoveControlTrait;
+use crate::entity::ai::control::body_rotation_control::BodyRotationControl;
 use crate::entity::ai::control::look_control::LookControl;
 use crate::entity::ai::control::move_control::MoveControl;
 use crate::entity::ai::goal::goal_selector::GoalSelector;
@@ -86,6 +87,7 @@ pub struct MobEntity {
     pub look_control: std::sync::Mutex<LookControl>,
     pub sensing: std::sync::Mutex<Sensing>,
     pub move_control: std::sync::Mutex<Box<dyn MoveControlTrait>>,
+    pub body_rotation_control: std::sync::Mutex<BodyRotationControl>,
     pub brain: std::sync::Mutex<Brain>,
     pub position_target: AtomicCell<BlockPos>,
     pub position_target_range: AtomicI32,
@@ -173,6 +175,7 @@ impl MobEntity {
             look_control: std::sync::Mutex::new(LookControl::default()),
             sensing: std::sync::Mutex::new(Sensing::default()),
             move_control: std::sync::Mutex::new(Box::new(MoveControl::default())),
+            body_rotation_control: std::sync::Mutex::new(BodyRotationControl::new()),
             brain: std::sync::Mutex::new(Brain::default()),
             position_target: AtomicCell::new(BlockPos::ZERO),
             position_target_range: AtomicI32::new(-1),
@@ -318,6 +321,14 @@ impl MobEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             move_control.tick(mob);
         };
+    }
+
+    /// Turns the body and head after the mob has moved, vanilla `BodyRotationControl.clientTick`.
+    pub fn tick_body_rotation(&self, max_head_rotation: f32) {
+        self.body_rotation_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .client_tick(self, max_head_rotation);
     }
 
     pub fn clear_ai_goals(&self, mob: &dyn Mob) {
@@ -918,6 +929,12 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn post_tick(&self) {}
 
+    /// Vanilla `Mob.tickHeadTurn`, run after the mob has moved this tick.
+    fn tick_head_turn(&self) {
+        self.get_mob_entity()
+            .tick_body_rotation(self.get_max_head_rotation());
+    }
+
     fn get_preferred_weapon_type(&self) -> Option<&'static pumpkin_data::tag::Tag> {
         None
     }
@@ -1422,6 +1439,7 @@ impl<T: Mob + Send + 'static> EntityBase for T {
         }
 
         mob_entity.living_entity.tick(caller, server);
+        self.tick_head_turn();
         self.post_tick();
     }
 
