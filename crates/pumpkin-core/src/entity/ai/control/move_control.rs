@@ -1,7 +1,9 @@
 use crate::entity::ai::control::{Control, MoveControlTrait};
+use crate::entity::ai::pathfinder::node::PathType;
 use crate::entity::mob::Mob;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use std::sync::atomic::Ordering;
 
@@ -49,9 +51,21 @@ impl MoveControlTrait for MoveControl {
         let entity = &living_entity.entity;
         match self.operation {
             Operation::Strafe => {
-                // TODO: is_walkable check
-                let movement_speed = living_entity.get_attribute_value(&Attributes::MOVEMENT_SPEED);
-                living_entity.set_speed(self.speed_modifier * movement_speed);
+                let movement_speed =
+                    living_entity.get_attribute_value(&Attributes::MOVEMENT_SPEED) as f32;
+                let speed_modified = self.speed_modifier as f32 * movement_speed;
+                let scale = speed_modified / self.strafe_forwards.hypot(self.strafe_right).max(1.0);
+                let xa = self.strafe_forwards * scale;
+                let za = self.strafe_right * scale;
+                let (sin, cos) = entity.yaw.load().to_radians().sin_cos();
+                let dx = xa * cos - za * sin;
+                let dz = za * cos + xa * sin;
+                if !Self::is_walkable(mob, dx, dz) {
+                    self.strafe_forwards = 1.0;
+                    self.strafe_right = 0.0;
+                }
+
+                living_entity.set_speed(f64::from(speed_modified));
                 living_entity.movement_input.store(Vector3::new(
                     f64::from(self.strafe_right),
                     0.0,
@@ -143,6 +157,24 @@ impl MoveControlTrait for MoveControl {
 }
 
 impl MoveControl {
+    /// Whether the block the strafe would step into is plain walkable ground for this mob.
+    fn is_walkable(mob: &dyn Mob, dx: f32, dz: f32) -> bool {
+        let mob_entity = mob.get_mob_entity();
+        let entity = &mob_entity.living_entity.entity;
+        let pos = entity.pos.load();
+        let target = BlockPos::floored(
+            pos.x + f64::from(dx),
+            f64::from(entity.block_pos.load().0.y),
+            pos.z + f64::from(dz),
+        );
+        mob_entity
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_path_type(&mob_entity.living_entity, target)
+            == PathType::Walkable
+    }
+
     #[must_use]
     pub fn has_wanted(&self) -> bool {
         self.operation == Operation::MoveTo
