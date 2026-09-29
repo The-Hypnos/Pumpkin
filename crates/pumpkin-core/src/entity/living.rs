@@ -1584,6 +1584,7 @@ impl LivingEntity {
         let movement_input = self.movement_input.load();
 
         let falling = self.entity.velocity.load().y <= 0.0;
+        let old_y = self.entity.pos.load().y;
         let gravity = self.get_effective_gravity(caller);
         let effective_speed = self.get_attribute_value(&Attributes::MOVEMENT_SPEED);
 
@@ -1651,17 +1652,25 @@ impl LivingEntity {
             self.entity.velocity.store(velo);
         }
 
+        self.jump_out_of_fluid(old_y);
+    }
+
+    /// Vanilla `jumpOutOfFluid`: a swimmer pushing against a ledge with room above hops onto it.
+    fn jump_out_of_fluid(&self, old_y: f64) {
         let mut velo = self.entity.velocity.load();
+        if !self.entity.horizontal_collision.load(SeqCst) {
+            return;
+        }
 
-        if self.entity.horizontal_collision.load(SeqCst)
-            && !self
-                .entity
-                .world
-                .load()
-                .check_fluid_collision(self.entity.bounding_box.load().shift(velo))
-        {
+        let lift = velo.y + 0.6 - self.entity.pos.load().y + old_y;
+        let raised_box = self
+            .entity
+            .bounding_box
+            .load()
+            .shift(Vector3::new(velo.x, lift, velo.z));
+        let world = self.entity.world.load();
+        if world.is_space_empty(raised_box) && !world.contains_any_liquid(raised_box) {
             velo.y = 0.3;
-
             self.entity.velocity.store(velo);
         }
     }
