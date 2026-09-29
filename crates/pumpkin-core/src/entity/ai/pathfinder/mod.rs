@@ -34,7 +34,6 @@ pub mod walk_node_evaluator;
 const MAX_ITERS: usize = 560;
 const TARGET_DISTANCE_MULTIPLIER: f32 = 1.5;
 const NODE_REACH_Y: f64 = 1.0;
-const MAX_YAW_TURN_PER_TICK: f32 = 90.0;
 
 pub struct PathFinder {
     max_visited_nodes: usize,
@@ -385,6 +384,10 @@ pub trait PathNavigationTrait: Send + Sync {
         distance: f32,
     ) -> bool;
     fn tick(&mut self, entity: &LivingEntity);
+    /// Where this tick's navigation wants the move control to go, with the speed modifier.
+    fn take_wanted_position(&mut self) -> Option<(Vector3<f64>, f64)> {
+        None
+    }
     fn move_to_coords(&mut self, x: f64, y: f64, z: f64, speed: f64, entity: &LivingEntity)
     -> bool;
     fn move_to_pos(&mut self, pos: BlockPos, speed: f64, entity: &LivingEntity) -> bool;
@@ -449,6 +452,8 @@ pub struct PathNavigation {
     pub open_set: BinaryHeap,
     pub neighbors_buf: Vec<Node>,
     pub is_idle: AtomicBool,
+    /// Where the move control should head this tick, with the speed modifier.
+    pub wanted_position: Option<(Vector3<f64>, f64)>,
 }
 
 impl Default for PathNavigation {
@@ -497,6 +502,7 @@ impl PathNavigation {
             open_set: BinaryHeap::new(),
             neighbors_buf: Vec::new(),
             is_idle: AtomicBool::new(true),
+            wanted_position: None,
         }
     }
 
@@ -807,6 +813,16 @@ impl PathNavigation {
         column_pos
     }
 
+    /// Vanilla `PathNavigation.getGroundY`.
+    fn get_ground_y(world: &World, target: Vector3<f64>) -> f64 {
+        let pos = BlockPos::floored_v(target);
+        if world.get_block_state(&pos.down()).is_air() {
+            target.y
+        } else {
+            WalkNodeEvaluator::floor_level(world, &pos)
+        }
+    }
+
     pub fn get_surface_y(&self, entity: &LivingEntity) -> f64 {
         let pos = entity.entity.pos.load();
         if entity.entity.touching_water.load(Ordering::Relaxed) && self.can_float {
@@ -1077,19 +1093,11 @@ impl PathNavigation {
             let on_ground = entity.entity.on_ground.load(Ordering::Relaxed);
 
             if let Some(next_block) = path.get_next_node_pos() {
-                let target_pos = Vector3::new(
-                    f64::from(next_block.0.x) + 0.5,
-                    f64::from(next_block.0.y),
-                    f64::from(next_block.0.z) + 0.5,
-                );
-
                 let current_pos = entity.entity.pos.load();
-                let dx = target_pos.x - current_pos.x;
-                let dy = target_pos.y - current_pos.y;
-                let dz = target_pos.z - current_pos.z;
-
-                let horizontal_dist_sq = dx * dx + dz * dz;
-                let horizontal_dist = horizontal_dist_sq.sqrt();
+                let dx = f64::from(next_block.0.x) + 0.5 - current_pos.x;
+                let dy = f64::from(next_block.0.y) - current_pos.y;
+                let dz = f64::from(next_block.0.z) + 0.5 - current_pos.z;
+                let horizontal_dist = dx.hypot(dz);
 
                 self.max_distance_to_waypoint = if self.mob_width > 0.75 {
                     self.mob_width * 0.5
@@ -1097,14 +1105,9 @@ impl PathNavigation {
                     0.75 - self.mob_width * 0.5
                 };
 
-                if !on_ground
+                let dropped_past = !on_ground
                     && horizontal_dist < f64::from(self.max_distance_to_waypoint)
-                    && dy < -0.5
-                {
-                    path.advance();
-                    self.current_goal = Some(goal);
-                    return;
-                }
+                    && dy < -0.5;
 
                 let close_enough = horizontal_dist < f64::from(self.max_distance_to_waypoint)
                     && dy.abs() < NODE_REACH_Y;
@@ -1115,39 +1118,23 @@ impl PathNavigation {
                         && n.path_type != PathType::WalkableDoor
                 }) && Self::should_target_next_node_in_direction(mob_pos, path);
 
-                if close_enough || corner_cut {
+                if dropped_past || close_enough || corner_cut {
                     path.advance();
-                    self.current_goal = Some(goal);
-                    return;
-                }
-
-                let desired_yaw = wrap_degrees((dz.atan2(dx) as f32).to_degrees() - 90.0);
-                let current_yaw = entity.entity.yaw.load();
-                let yaw_diff = wrap_degrees(desired_yaw - current_yaw);
-                let target_yaw =
-                    current_yaw + yaw_diff.clamp(-MAX_YAW_TURN_PER_TICK, MAX_YAW_TURN_PER_TICK);
-                entity.entity.yaw.store(target_yaw);
-                entity.entity.head_yaw.store(target_yaw);
-                entity.entity.body_yaw.store(target_yaw);
-
-                let mob_speed =
-                    goal.speed * entity.get_attribute_value(&Attributes::MOVEMENT_SPEED);
-
-                entity.set_speed(mob_speed);
-
-                let step_height = entity.get_attribute_value(&Attributes::STEP_HEIGHT);
-                let jump_distance = 1.0f64.max(f64::from(self.mob_width));
-
-                if (dy > step_height || f64::from(next_block.0.y) > current_pos.y)
-                    && horizontal_dist_sq < jump_distance * jump_distance
-                {
-                    entity.jumping.store(true, Ordering::SeqCst);
-                } else {
-                    entity.jumping.store(false, Ordering::SeqCst);
                 }
             } else {
                 self.finish_navigation(entity);
                 return;
+            }
+
+            // Vanilla PathNavigation.tick: the move control walks the mob to the next node.
+            if let Some(target) = path.get_next_entity_pos(self.mob_width) {
+                let ground_y = if matches!(self.evaluator, EvaluatorKind::Amphibious(_)) {
+                    target.y
+                } else {
+                    Self::get_ground_y(&entity.entity.world.load(), target)
+                };
+                self.wanted_position =
+                    Some((Vector3::new(target.x, ground_y, target.z), goal.speed));
             }
         }
 
@@ -1234,6 +1221,10 @@ impl PathNavigationTrait for GroundPathNavigation {
 
     fn tick(&mut self, entity: &LivingEntity) {
         self.inner.tick_ground(entity);
+    }
+
+    fn take_wanted_position(&mut self) -> Option<(Vector3<f64>, f64)> {
+        self.inner.wanted_position.take()
     }
 
     fn move_to_coords(
@@ -2387,6 +2378,10 @@ impl PathNavigationTrait for AmphibiousPathNavigation {
         } else {
             self.inner.tick_ground(entity);
         }
+    }
+
+    fn take_wanted_position(&mut self) -> Option<(Vector3<f64>, f64)> {
+        self.inner.wanted_position.take()
     }
 
     fn move_to_coords(

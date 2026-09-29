@@ -1,4 +1,4 @@
-use crate::entity::ai::control::move_control::Operation;
+use crate::entity::ai::control::move_control::{MIN_SPEED_SQR, Operation};
 use crate::entity::ai::control::{Control, MoveControlTrait};
 use crate::entity::mob::Mob;
 use pumpkin_data::attributes::Attributes;
@@ -48,7 +48,7 @@ impl MoveControlTrait for FlyingMoveControl {
             let zd = self.wanted_z - pos.z;
             let dd = xd * xd + yd * yd + zd * zd;
 
-            if dd < 2.5000003E-7 {
+            if dd < MIN_SPEED_SQR {
                 living_entity
                     .movement_input
                     .store(Vector3::new(0.0, 0.0, 0.0));

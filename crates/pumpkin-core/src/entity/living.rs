@@ -1509,8 +1509,13 @@ impl LivingEntity {
     /// Vanilla `Mob.setSpeed`: the walking speed, which a mob also takes as its forward input.
     pub fn set_speed(&self, speed: f64) {
         self.speed.store(speed);
+        self.set_zza(speed);
+    }
+
+    /// Vanilla `setZza`: the forward input, leaving the sideways one alone.
+    pub fn set_zza(&self, zza: f64) {
         let mut input = self.movement_input.load();
-        input.z = speed;
+        input.z = zza;
         self.movement_input.store(input);
     }
 

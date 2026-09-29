@@ -7,6 +7,7 @@ use crate::entity::ai::pathfinder::{
     node_evaluator::{BaseNodeEvaluator, MobData, NodeEvaluator},
     pathfinding_context::PathfindingContext,
 };
+use crate::world::World;
 
 pub struct WalkNodeEvaluator {
     pub base: BaseNodeEvaluator,
@@ -24,6 +25,18 @@ impl WalkNodeEvaluator {
             reusable_neighbors: [None, None, None, None],
             is_amphibious: false,
         }
+    }
+
+    /// Vanilla's static `WalkNodeEvaluator.getFloorLevel`: the top of whatever is under `pos`.
+    #[must_use]
+    pub fn floor_level(world: &World, pos: &BlockPos) -> f64 {
+        let target = pos.down();
+        let max_y = world
+            .get_block_state(&target)
+            .get_block_collision_shapes_at(&target)
+            .map(|s| s.max.y)
+            .fold(0.0f64, f64::max);
+        f64::from(target.0.y) + max_y
     }
 
     #[must_use]
