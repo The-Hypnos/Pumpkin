@@ -1,4 +1,5 @@
 use crate::entity::ai::control::Control;
+use crate::entity::ai::control::move_control::MIN_SPEED_SQR;
 use crate::entity::mob::MobEntity;
 use pumpkin_util::math::rotate_if_necessary;
 
@@ -87,7 +88,7 @@ impl BodyRotationControl {
     fn is_moving(mob: &MobEntity) -> bool {
         let entity = &mob.living_entity.entity;
         let delta = entity.pos.load() - entity.last_pos.load();
-        delta.x * delta.x + delta.z * delta.z > 2.500_000_3e-7
+        delta.x * delta.x + delta.z * delta.z > MIN_SPEED_SQR
     }
 }
 

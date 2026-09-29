@@ -1,8 +1,11 @@
 use crate::entity::ai::control::{Control, MoveControlTrait};
 use crate::entity::mob::Mob;
 use pumpkin_data::attributes::Attributes;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::vector3::Vector3;
 use std::sync::atomic::Ordering;
+
+pub const MIN_SPEED_SQR: f64 = 2.500_000_3E-7;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
@@ -44,57 +47,77 @@ impl MoveControlTrait for MoveControl {
         let mob_entity = mob.get_mob_entity();
         let living_entity = &mob_entity.living_entity;
         let entity = &living_entity.entity;
-        if self.operation == Operation::Strafe {
-            // TODO: is_walkable check
-            let movement_speed = living_entity.get_attribute_value(&Attributes::MOVEMENT_SPEED);
-            living_entity.set_speed(self.speed_modifier * movement_speed);
-            living_entity.movement_input.store(Vector3::new(
-                f64::from(self.strafe_right),
-                0.0,
-                f64::from(self.strafe_forwards),
-            ));
-            self.operation = Operation::Wait;
-        } else if self.operation == Operation::MoveTo {
-            self.operation = Operation::Wait;
-            let pos = entity.pos.load();
-            let xd = self.wanted_x - pos.x;
-            let zd = self.wanted_z - pos.z;
-            let yd = self.wanted_y - pos.y;
-            let dd = xd * xd + yd * yd + zd * zd;
-
-            if dd < 2.5000003E-7 {
-                living_entity
-                    .movement_input
-                    .store(Vector3::new(0.0, 0.0, 0.0));
-                return;
-            }
-
-            let y_rot_d = (zd.atan2(xd).to_degrees() as f32) - 90.0;
-            entity
-                .yaw
-                .store(self.change_angle(entity.yaw.load(), y_rot_d, 90.0));
-
-            let movement_speed = living_entity.get_attribute_value(&Attributes::MOVEMENT_SPEED);
-            living_entity.set_speed(self.speed_modifier * movement_speed);
-
-            // TODO: Jump if needed (based on collision and height difference)
-            let step_height = living_entity.get_attribute_value(&Attributes::STEP_HEIGHT);
-            if yd > step_height
-                && xd * xd + zd * zd < 1.0f64.max(entity.entity_dimension.load().width as f64)
-            {
-                living_entity.jumping.store(true, Ordering::SeqCst);
-                self.operation = Operation::Jumping;
-            }
-        } else if self.operation == Operation::Jumping {
-            let movement_speed = living_entity.get_attribute_value(&Attributes::MOVEMENT_SPEED);
-            living_entity.set_speed(self.speed_modifier * movement_speed);
-
-            if entity.on_ground.load(Ordering::Relaxed) {
+        match self.operation {
+            Operation::Strafe => {
+                // TODO: is_walkable check
+                let movement_speed = living_entity.get_attribute_value(&Attributes::MOVEMENT_SPEED);
+                living_entity.set_speed(self.speed_modifier * movement_speed);
+                living_entity.movement_input.store(Vector3::new(
+                    f64::from(self.strafe_right),
+                    0.0,
+                    f64::from(self.strafe_forwards),
+                ));
                 self.operation = Operation::Wait;
             }
-        }
+            Operation::MoveTo => {
+                self.operation = Operation::Wait;
+                let pos = entity.pos.load();
+                let xd = self.wanted_x - pos.x;
+                let zd = self.wanted_z - pos.z;
+                let yd = self.wanted_y - pos.y;
+                let dd = xd * xd + yd * yd + zd * zd;
 
-        // Navigator owns movement input while this controller waits.
+                if dd < MIN_SPEED_SQR {
+                    living_entity.set_zza(0.0);
+                    return;
+                }
+
+                let y_rot_d = (zd.atan2(xd).to_degrees() as f32) - 90.0;
+                entity
+                    .yaw
+                    .store(self.change_angle(entity.yaw.load(), y_rot_d, 90.0));
+
+                let movement_speed = living_entity.get_attribute_value(&Attributes::MOVEMENT_SPEED);
+                living_entity.set_speed(self.speed_modifier * movement_speed);
+
+                let block_pos = entity.block_pos.load();
+                let world = entity.world.load();
+                let (block, state) = world.get_block_and_state(&block_pos);
+                // The top of the block the mob stands in; stairs, slabs and the like.
+                let shape_top = state
+                    .get_block_collision_shapes_at(&block_pos)
+                    .map(|shape| shape.max.y)
+                    .reduce(f64::max);
+
+                let step_height = living_entity.get_attribute_value(&Attributes::STEP_HEIGHT);
+                let width = f64::from(entity.entity_dimension.load().width);
+                if yd > step_height && xd * xd + zd * zd < 1.0f64.max(width)
+                    || shape_top.is_some_and(|top| {
+                        pos.y < top + f64::from(block_pos.0.y)
+                            && !block.has_tag(&tag::Block::MINECRAFT_DOORS)
+                            && !block.has_tag(&tag::Block::MINECRAFT_FENCES)
+                    })
+                {
+                    mob_entity
+                        .jump_control
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .jump();
+                    self.operation = Operation::Jumping;
+                }
+            }
+            Operation::Jumping => {
+                let movement_speed = living_entity.get_attribute_value(&Attributes::MOVEMENT_SPEED);
+                living_entity.set_speed(self.speed_modifier * movement_speed);
+
+                let in_liquid = entity.touching_water.load(Ordering::Relaxed)
+                    || entity.touching_lava.load(Ordering::Relaxed);
+                if entity.on_ground.load(Ordering::Relaxed) || in_liquid {
+                    self.operation = Operation::Wait;
+                }
+            }
+            Operation::Wait => living_entity.set_zza(0.0),
+        }
     }
 
     fn set_wanted_position(&mut self, x: f64, y: f64, z: f64, speed_modifier: f64) {

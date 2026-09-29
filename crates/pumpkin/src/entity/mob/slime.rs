@@ -439,7 +439,11 @@ impl MoveControlTrait for SlimeMoveControl {
                         next_delay /= 3;
                     }
                     slime.jump_delay.store(next_delay, Ordering::Relaxed);
-                    living_entity.jumping.store(true, Ordering::SeqCst);
+                    mob_entity
+                        .jump_control
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .jump();
                     if slime.do_play_jump_sound() {
                         let world = entity.world.load();
                         world.play_sound_fine(
@@ -454,17 +458,10 @@ impl MoveControlTrait for SlimeMoveControl {
                 } else {
                     slime.jump_delay.store(current_delay - 1, Ordering::Relaxed);
                     speed = Some(0.0);
-                    living_entity.jumping.store(false, Ordering::SeqCst);
                 }
-            } else {
-                living_entity.jumping.store(false, Ordering::SeqCst);
             }
-        } else {
-            // In air: move forward but don't "jump" again
-            if speed_modifier > 0.0 {
-                speed = Some(walk_speed);
-            }
-            living_entity.jumping.store(false, Ordering::SeqCst);
+        } else if speed_modifier > 0.0 {
+            speed = Some(walk_speed);
         }
         living_entity.movement_input.store(Vector3::default());
         if let Some(speed) = speed {

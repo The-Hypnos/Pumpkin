@@ -9,6 +9,7 @@ use crate::{
     entity::ai::pathfinder::{
         node::{Coordinate, PathComputationType, PathType},
         path_type_cache::PathTypeCache,
+        walk_node_evaluator::WalkNodeEvaluator,
     },
     world::World,
 };
@@ -243,13 +244,7 @@ impl PathfindingContext {
 
     #[must_use]
     pub fn get_floor_level(&self, pos: &BlockPos) -> f64 {
-        let target = pos.down();
-        let state = self.world.get_block_state(&target);
-        let max_y = state
-            .get_block_collision_shapes_at(&target)
-            .map(|s| s.max.y)
-            .fold(0.0f64, f64::max);
-        f64::from(target.0.y) + max_y
+        WalkNodeEvaluator::floor_level(&self.world, pos)
     }
 
     pub fn has_collision(&mut self, bb: &BoundingBox) -> bool {

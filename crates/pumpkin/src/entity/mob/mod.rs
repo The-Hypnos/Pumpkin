@@ -3,6 +3,7 @@ use crate::entity::ai::brain::Brain;
 use crate::entity::ai::brain::memory::PackedMemories;
 use crate::entity::ai::control::MoveControlTrait;
 use crate::entity::ai::control::body_rotation_control::BodyRotationControl;
+use crate::entity::ai::control::jump_control::JumpControl;
 use crate::entity::ai::control::look_control::LookControl;
 use crate::entity::ai::control::move_control::MoveControl;
 use crate::entity::ai::goal::goal_selector::GoalSelector;
@@ -88,6 +89,7 @@ pub struct MobEntity {
     pub sensing: std::sync::Mutex<Sensing>,
     pub move_control: std::sync::Mutex<Box<dyn MoveControlTrait>>,
     pub body_rotation_control: std::sync::Mutex<BodyRotationControl>,
+    pub jump_control: std::sync::Mutex<JumpControl>,
     pub brain: std::sync::Mutex<Brain>,
     pub position_target: AtomicCell<BlockPos>,
     pub position_target_range: AtomicI32,
@@ -176,6 +178,7 @@ impl MobEntity {
             sensing: std::sync::Mutex::new(Sensing::default()),
             move_control: std::sync::Mutex::new(Box::new(MoveControl::default())),
             body_rotation_control: std::sync::Mutex::new(BodyRotationControl::new()),
+            jump_control: std::sync::Mutex::new(JumpControl::default()),
             brain: std::sync::Mutex::new(Brain::default()),
             position_target: AtomicCell::new(BlockPos::ZERO),
             position_target_range: AtomicI32::new(-1),
@@ -295,6 +298,7 @@ impl MobEntity {
         };
 
         navigator.tick(&self.living_entity);
+        let wanted_position = navigator.take_wanted_position();
 
         {
             *self
@@ -303,9 +307,24 @@ impl MobEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = navigator;
         };
 
+        if let Some((pos, speed_modifier)) = wanted_position {
+            self.move_control
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .set_wanted_position(pos.x, pos.y, pos.z, speed_modifier);
+        }
+
         mob.custom_server_ai_step(caller);
 
         // Controllers are synchronous, so we can just use normal blocks
+        {
+            let mut move_control = self
+                .move_control
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            move_control.tick(mob);
+        };
+
         {
             let mut look_control = self
                 .look_control
@@ -314,13 +333,10 @@ impl MobEntity {
             look_control.tick(mob);
         };
 
-        {
-            let mut move_control = self
-                .move_control
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            move_control.tick(mob);
-        };
+        self.jump_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .tick(mob);
     }
 
     /// Turns the body and head after the mob has moved, vanilla `BodyRotationControl.clientTick`.
