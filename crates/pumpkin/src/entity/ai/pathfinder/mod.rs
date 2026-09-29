@@ -327,6 +327,19 @@ impl EvaluatorKind {
         }
     }
 
+    pub fn get_path_type(
+        &mut self,
+        context: &mut PathfindingContext,
+        pos: Vector3<i32>,
+    ) -> PathType {
+        match self {
+            Self::Walk(e) => e.get_path_type(context, pos),
+            Self::Fly(e) => e.get_path_type(context, pos),
+            Self::Swim(e) => e.get_path_type(context, pos),
+            Self::Amphibious(e) => e.get_path_type(context, pos),
+        }
+    }
+
     pub fn set_can_float(&mut self, can_float: bool) {
         match self {
             Self::Walk(e) => e.set_can_float(can_float),
@@ -388,6 +401,7 @@ pub trait PathNavigationTrait: Send + Sync {
     fn take_wanted_position(&mut self) -> Option<(Vector3<f64>, f64)> {
         None
     }
+    fn get_path_type(&mut self, entity: &LivingEntity, pos: BlockPos) -> PathType;
     fn move_to_coords(&mut self, x: f64, y: f64, z: f64, speed: f64, entity: &LivingEntity)
     -> bool;
     fn move_to_pos(&mut self, pos: BlockPos, speed: f64, entity: &LivingEntity) -> bool;
@@ -530,6 +544,15 @@ impl PathNavigation {
         self.ticks_on_current_node = 0;
         self.total_ticks = 0;
         self.path_start_pos = None;
+    }
+
+    /// Vanilla `NodeEvaluator.getPathType(mob, pos)`: what this mob's evaluator makes of one block.
+    pub fn get_path_type(&mut self, entity: &LivingEntity, pos: BlockPos) -> PathType {
+        let mut context = PathfindingContext::new(
+            entity.entity.block_pos.load().0,
+            entity.entity.world.load_full(),
+        );
+        self.evaluator.get_path_type(&mut context, pos.0)
     }
 
     pub fn finish_navigation(&mut self, entity: &LivingEntity) {
@@ -1170,6 +1193,10 @@ impl PathNavigationTrait for GroundPathNavigation {
         self.inner.set_speed(speed);
     }
 
+    fn get_path_type(&mut self, entity: &LivingEntity, pos: BlockPos) -> PathType {
+        self.inner.get_path_type(entity, pos)
+    }
+
     fn stop(&mut self) {
         self.inner.stop();
     }
@@ -1408,6 +1435,10 @@ impl PathNavigationTrait for FlyingPathNavigation {
 
     fn set_speed(&mut self, speed: f64) {
         self.inner.set_speed(speed);
+    }
+
+    fn get_path_type(&mut self, entity: &LivingEntity, pos: BlockPos) -> PathType {
+        self.inner.get_path_type(entity, pos)
     }
 
     fn stop(&mut self) {
@@ -1712,6 +1743,10 @@ impl PathNavigationTrait for WaterBoundPathNavigation {
         self.inner.set_speed(speed);
     }
 
+    fn get_path_type(&mut self, entity: &LivingEntity, pos: BlockPos) -> PathType {
+        self.inner.get_path_type(entity, pos)
+    }
+
     fn stop(&mut self) {
         self.inner.stop();
     }
@@ -2013,6 +2048,10 @@ impl PathNavigationTrait for WallClimberNavigation {
         self.inner.set_speed(speed);
     }
 
+    fn get_path_type(&mut self, entity: &LivingEntity, pos: BlockPos) -> PathType {
+        self.inner.get_path_type(entity, pos)
+    }
+
     fn stop(&mut self) {
         self.path_to_position = None;
         self.inner.stop();
@@ -2237,6 +2276,10 @@ impl PathNavigationTrait for AmphibiousPathNavigation {
 
     fn set_speed(&mut self, speed: f64) {
         self.inner.set_speed(speed);
+    }
+
+    fn get_path_type(&mut self, entity: &LivingEntity, pos: BlockPos) -> PathType {
+        self.inner.get_path_type(entity, pos)
     }
 
     fn stop(&mut self) {
