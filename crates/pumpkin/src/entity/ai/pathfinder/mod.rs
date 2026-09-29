@@ -432,10 +432,6 @@ pub struct PathNavigation {
     pub max_visited_nodes_multiplier: f32,
     pub is_stuck: bool,
     pub required_path_length: f32,
-    pub ticks_on_current_node: u32,
-    pub last_node_index: usize,
-    pub total_ticks: u32,
-    pub path_start_pos: Option<Vector3<f64>>,
     pub path_type_overrides: FxHashMap<PathType, f32>,
     pub mob_width: f32,
     pub mob_height: f32,
@@ -480,10 +476,6 @@ impl PathNavigation {
             max_visited_nodes_multiplier: 1.0,
             is_stuck: false,
             required_path_length: 16.0,
-            ticks_on_current_node: 0,
-            last_node_index: 0,
-            total_ticks: 0,
-            path_start_pos: None,
             path_type_overrides: FxHashMap::default(),
             mob_width: 0.6,
             mob_height: 1.95,
@@ -521,9 +513,6 @@ impl PathNavigation {
         self.is_idle.store(true, Ordering::Relaxed);
         self.current_goal = None;
         self.path = None;
-        self.ticks_on_current_node = 0;
-        self.total_ticks = 0;
-        self.path_start_pos = None;
     }
 
     pub fn finish_navigation(&mut self, entity: &LivingEntity) {
@@ -1002,7 +991,6 @@ impl PathNavigation {
             return;
         }
 
-        self.total_ticks += 1;
         if self.repath_cooldown > 0 {
             self.repath_cooldown -= 1;
         }
@@ -1019,9 +1007,6 @@ impl PathNavigation {
                 f64::from(dest_pos.0.z) + 0.5,
             );
             self.path = self.compute_path(entity, dest_v, self.reach_range);
-            self.ticks_on_current_node = 0;
-            self.last_node_index = 0;
-            self.path_start_pos = Some(entity.entity.pos.load());
             self.repath_cooldown = 15;
             self.time_last_recompute = world_age;
         }
@@ -1044,34 +1029,6 @@ impl PathNavigation {
             if path.is_done() {
                 self.finish_navigation(entity);
                 return;
-            }
-
-            let current_node_index = path.get_next_node_index();
-            if current_node_index == self.last_node_index {
-                self.ticks_on_current_node += 1;
-            } else {
-                self.ticks_on_current_node = 0;
-                self.last_node_index = current_node_index;
-            }
-
-            if self.ticks_on_current_node > 100 {
-                self.finish_navigation(entity);
-                return;
-            }
-
-            if self.total_ticks.is_multiple_of(100) {
-                if let Some(start_pos) = self.path_start_pos {
-                    let current_pos = entity.entity.pos.load();
-                    let dx = current_pos.x - start_pos.x;
-                    let dy = current_pos.y - start_pos.y;
-                    let dz = current_pos.z - start_pos.z;
-                    let dist_sq = dx * dx + dy * dy + dz * dz;
-                    if dist_sq < 4.0 {
-                        self.finish_navigation(entity);
-                        return;
-                    }
-                }
-                self.path_start_pos = Some(entity.entity.pos.load());
             }
 
             let on_ground = entity.entity.on_ground.load(Ordering::Relaxed);
@@ -1482,9 +1439,6 @@ impl PathNavigationTrait for FlyingPathNavigation {
         if let Some(goal) = self.inner.current_goal.take() {
             if self.inner.needs_new_path(&goal) {
                 self.inner.path = self.inner.compute_path(entity, goal.destination, 1);
-                self.inner.ticks_on_current_node = 0;
-                self.inner.last_node_index = 0;
-                self.inner.path_start_pos = Some(entity.entity.pos.load());
                 self.inner.repath_cooldown = 15;
                 self.inner.time_last_recompute = world_age;
             }
@@ -1783,9 +1737,6 @@ impl PathNavigationTrait for WaterBoundPathNavigation {
         if let Some(goal) = self.inner.current_goal.take() {
             if self.inner.needs_new_path(&goal) {
                 self.inner.path = self.inner.compute_path(entity, goal.destination, 1);
-                self.inner.ticks_on_current_node = 0;
-                self.inner.last_node_index = 0;
-                self.inner.path_start_pos = Some(entity.entity.pos.load());
                 self.inner.repath_cooldown = 15;
                 self.inner.time_last_recompute = world_age;
             }
@@ -2310,9 +2261,6 @@ impl PathNavigationTrait for AmphibiousPathNavigation {
             if let Some(goal) = self.inner.current_goal.take() {
                 if self.inner.needs_new_path(&goal) {
                     self.inner.path = self.inner.compute_path(entity, goal.destination, 1);
-                    self.inner.ticks_on_current_node = 0;
-                    self.inner.last_node_index = 0;
-                    self.inner.path_start_pos = Some(entity.entity.pos.load());
                     self.inner.repath_cooldown = 15;
                     self.inner.time_last_recompute = world_age;
                 }
