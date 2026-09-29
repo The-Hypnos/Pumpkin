@@ -377,7 +377,6 @@ pub trait PathNavigationTrait: Send + Sync {
     fn get_path_mut(&mut self) -> Option<&mut Path>;
     fn set_pathfinding_malus(&mut self, path_type: PathType, malus: f32);
     fn get_pathfinding_malus(&self, path_type: PathType) -> f32;
-    fn set_mob_dimensions(&mut self, width: f32, height: f32);
     fn can_reach_within(
         &mut self,
         entity: &LivingEntity,
@@ -544,9 +543,11 @@ impl PathNavigation {
             .unwrap_or_else(|| path_type.get_malus())
     }
 
-    pub const fn set_mob_dimensions(&mut self, width: f32, height: f32) {
-        self.mob_width = width;
-        self.mob_height = height;
+    /// Vanilla reads the mob's bounding box whenever it plans or follows a path.
+    fn sync_mob_dimensions(&mut self, entity: &LivingEntity) {
+        let dimensions = entity.entity.entity_dimension.load();
+        self.mob_width = dimensions.width;
+        self.mob_height = dimensions.height;
     }
 
     pub fn can_reach_within(
@@ -571,6 +572,7 @@ impl PathNavigation {
         destination: Vector3<f64>,
         reach_range: i32,
     ) -> Option<Path> {
+        self.sync_mob_dimensions(entity);
         let start_pos_f = entity.entity.pos.load();
         let start_block_vec = BlockPos::floored_v(start_pos_f).0;
         let mob_position = Vector3::new(start_block_vec.x, start_block_vec.y, start_block_vec.z);
@@ -975,6 +977,7 @@ impl PathNavigation {
     #[allow(clippy::too_many_lines)]
     pub fn tick_ground(&mut self, entity: &LivingEntity) {
         self.tick_count += 1;
+        self.sync_mob_dimensions(entity);
         let world_age = entity.entity.world.load().get_world_age() as u64;
 
         if self.has_delayed_recomputation
@@ -1221,10 +1224,6 @@ impl PathNavigationTrait for GroundPathNavigation {
         self.inner.get_pathfinding_malus(path_type)
     }
 
-    fn set_mob_dimensions(&mut self, width: f32, height: f32) {
-        self.inner.set_mob_dimensions(width, height);
-    }
-
     fn can_reach_within(
         &mut self,
         entity: &LivingEntity,
@@ -1455,10 +1454,6 @@ impl PathNavigationTrait for FlyingPathNavigation {
 
     fn get_pathfinding_malus(&self, path_type: PathType) -> f32 {
         self.inner.get_pathfinding_malus(path_type)
-    }
-
-    fn set_mob_dimensions(&mut self, width: f32, height: f32) {
-        self.inner.set_mob_dimensions(width, height);
     }
 
     fn can_reach_within(
@@ -1758,10 +1753,6 @@ impl PathNavigationTrait for WaterBoundPathNavigation {
         self.inner.get_pathfinding_malus(path_type)
     }
 
-    fn set_mob_dimensions(&mut self, width: f32, height: f32) {
-        self.inner.set_mob_dimensions(width, height);
-    }
-
     fn can_reach_within(
         &mut self,
         entity: &LivingEntity,
@@ -2059,10 +2050,6 @@ impl PathNavigationTrait for WallClimberNavigation {
         self.inner.get_pathfinding_malus(path_type)
     }
 
-    fn set_mob_dimensions(&mut self, width: f32, height: f32) {
-        self.inner.set_mob_dimensions(width, height);
-    }
-
     fn can_reach_within(
         &mut self,
         entity: &LivingEntity,
@@ -2282,10 +2269,6 @@ impl PathNavigationTrait for AmphibiousPathNavigation {
 
     fn get_pathfinding_malus(&self, path_type: PathType) -> f32 {
         self.inner.get_pathfinding_malus(path_type)
-    }
-
-    fn set_mob_dimensions(&mut self, width: f32, height: f32) {
-        self.inner.set_mob_dimensions(width, height);
     }
 
     fn can_reach_within(
