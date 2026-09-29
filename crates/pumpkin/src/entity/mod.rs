@@ -13,6 +13,7 @@ use crossbeam::atomic::AtomicCell;
 use living::LivingEntity;
 use player::Player;
 use pumpkin_data::BlockState;
+use pumpkin_data::attributes::Attributes;
 use pumpkin_data::biome::Biome;
 use pumpkin_data::block_properties::blocks_movement;
 use pumpkin_data::data_component_impl::EquipmentSlot;
@@ -1495,6 +1496,101 @@ impl Entity {
         adjusted_movement
     }
 
+    /// The step-up half of vanilla `Entity.collide`: walking into something no higher than the
+    /// step height lifts the entity onto it instead of stopping it.
+    fn step_up(
+        &self,
+        caller: &dyn EntityBase,
+        movement: Vector3<f64>,
+        resolved: Vector3<f64>,
+        start_box: BoundingBox,
+        was_on_ground: bool,
+    ) -> Option<Vector3<f64>> {
+        let max_up_step = caller
+            .get_living_entity()?
+            .get_attribute_value(&Attributes::STEP_HEIGHT);
+        let horizontal_collision = movement.x != resolved.x || movement.z != resolved.z;
+        let on_ground_after_collision = movement.y != resolved.y && movement.y < 0.0;
+        if max_up_step <= 0.0
+            || !horizontal_collision
+            || !(on_ground_after_collision || was_on_ground)
+        {
+            return None;
+        }
+
+        let grounded_box = if on_ground_after_collision {
+            start_box.shift(Vector3::new(0.0, resolved.y, 0.0))
+        } else {
+            start_box
+        };
+        let mut step_up_box =
+            grounded_box.stretch(Vector3::new(movement.x, max_up_step, movement.z));
+        if !on_ground_after_collision {
+            step_up_box = step_up_box.stretch(Vector3::new(0.0, -1.0e-5, 0.0));
+        }
+        let (colliders, _) = self.world.load().get_block_collisions(step_up_box, caller);
+
+        // Vanilla `collectCandidateStepUpHeights`: every collider top or bottom within reach.
+        let max_up_step = max_up_step as f32;
+        let step_height_to_skip = resolved.y as f32;
+        let mut candidates: Vec<f32> = colliders
+            .iter()
+            .flat_map(|collider| [collider.min.y, collider.max.y])
+            .map(|y| (y - grounded_box.min.y) as f32)
+            .filter(|&height| {
+                height >= 0.0 && height != step_height_to_skip && height <= max_up_step
+            })
+            .collect();
+        candidates.sort_by(f32::total_cmp);
+        candidates.dedup();
+
+        for height in candidates {
+            let step = Self::collide_with_boxes(
+                Vector3::new(movement.x, f64::from(height), movement.z),
+                grounded_box,
+                &colliders,
+            );
+            if step.horizontal_length_squared() > resolved.horizontal_length_squared() {
+                let distance_to_ground = start_box.min.y - grounded_box.min.y;
+                return Some(step - Vector3::new(0.0, distance_to_ground, 0.0));
+            }
+        }
+        None
+    }
+
+    /// Vanilla `Entity.collideWithShapes`: moves the box one axis at a time, Y first.
+    fn collide_with_boxes(
+        movement: Vector3<f64>,
+        bounding_box: BoundingBox,
+        colliders: &[BoundingBox],
+    ) -> Vector3<f64> {
+        let horizontal = if movement.x.abs() < movement.z.abs() {
+            [Axis::Z, Axis::X]
+        } else {
+            [Axis::X, Axis::Z]
+        };
+        let mut resolved = Vector3::new(0.0, 0.0, 0.0);
+        for axis in std::iter::once(Axis::Y).chain(horizontal) {
+            let axis_movement = movement.get_axis(axis);
+            if axis_movement == 0.0 {
+                continue;
+            }
+            let moved_box = bounding_box.shift(resolved);
+            let mut along_axis = Vector3::new(0.0, 0.0, 0.0);
+            along_axis.set_axis(axis, axis_movement);
+            let mut max_time = 1.0;
+            for collider in colliders {
+                if let Some(time) =
+                    moved_box.calculate_collision_time(collider, along_axis, axis, max_time)
+                {
+                    max_time = time;
+                }
+            }
+            resolved.set_axis(axis, axis_movement * max_time);
+        }
+        resolved
+    }
+
     /// Applies knockback to the entity, following vanilla Minecraft's mechanics.
     /// `LivingEntity.takeKnockback()`
     /// This function calculates the entity's new velocity based on the specified knockback strength and direction.
@@ -2029,7 +2125,17 @@ impl Entity {
             self.velocity.store(Vector3::default());
         }
 
-        let final_move = self.adjust_movement_for_collisions(motion, caller);
+        let was_on_ground = self.on_ground.load(Ordering::SeqCst);
+        let start_box = self.bounding_box.load();
+        let mut final_move = self.adjust_movement_for_collisions(motion, caller);
+        if let Some(stepped) = self.step_up(caller, motion, final_move, start_box, was_on_ground) {
+            final_move = stepped;
+            self.horizontal_collision.store(
+                stepped.x != motion.x || stepped.z != motion.z,
+                Ordering::SeqCst,
+            );
+            self.on_ground.store(motion.y < 0.0, Ordering::SeqCst);
+        }
 
         self.move_pos(final_move);
 
