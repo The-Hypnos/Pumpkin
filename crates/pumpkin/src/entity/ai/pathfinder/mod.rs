@@ -617,6 +617,8 @@ impl PathNavigation {
         let context = PathfindingContext::new(mob_position, entity.entity.world.load_full());
         let mut mob_data = MobData::new(start_pos_f, self.mob_width, self.mob_height, 1.0);
         mob_data.on_ground = entity.entity.on_ground.load(Ordering::Relaxed);
+        // Vanilla `isInFloatableFluid`: a floating mob's path starts at the surface, not the bed.
+        mob_data.is_in_water = entity.entity.touching_water.load(Ordering::Relaxed);
         mob_data.can_swim = self.can_float;
 
         mob_data.set_pathfinding_malus(PathType::DangerFire, 16.0);
