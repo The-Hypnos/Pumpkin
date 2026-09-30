@@ -4935,6 +4935,16 @@ impl World {
             return;
         }
         base_entity.removed.store(true, Ordering::Release);
+        // `Entity::remove` passes the bare entity, so find the mob it belongs to.
+        if let Some(mob) = self
+            .entities
+            .load()
+            .iter()
+            .find(|e| e.get_entity().entity_uuid == base_entity.entity_uuid)
+            .and_then(|e| e.get_mob())
+        {
+            mob.get_mob_entity().clear_brain_on_removal();
+        }
 
         self.spawn_state.load().remove_entity(self, entity);
         self.entity_tracker.remove_entity(entity, self);
@@ -4977,6 +4987,11 @@ impl World {
         for entity in entities_to_remove {
             self.entity_tracker.remove_entity(entity.as_ref(), self);
             self.spawn_state.load().remove_entity(self, entity.as_ref());
+            // Saved above. Vanilla leaves unloaded brains to the garbage collector, but `Arc`
+            // cycles between brains are never freed here, so clear them like a removal.
+            if let Some(mob) = entity.get_mob() {
+                mob.get_mob_entity().clear_brain_on_removal();
+            }
         }
 
         for chunk_pos in &chunks_set {
