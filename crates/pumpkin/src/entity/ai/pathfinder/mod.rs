@@ -614,6 +614,7 @@ impl PathNavigation {
         self.open_set.clear();
         self.open_set.insert(start_node);
 
+        let navdbg_t0 = std::time::Instant::now();
         let mut iterations = 0usize;
         let mut reached = false;
         let max_iters = ((self.mob_max_follow_range(entity)
@@ -686,6 +687,33 @@ impl PathNavigation {
         }
 
         self.evaluator.done();
+        {
+            // Benchmark-only counters for the pathfinding review; not for merging.
+            use std::sync::atomic::AtomicU64;
+            static SEARCHES: AtomicU64 = AtomicU64::new(0);
+            static ITERS: AtomicU64 = AtomicU64::new(0);
+            static REACHED: AtomicU64 = AtomicU64::new(0);
+            static CAPPED: AtomicU64 = AtomicU64::new(0);
+            static MICROS: AtomicU64 = AtomicU64::new(0);
+            let us = navdbg_t0.elapsed().as_micros() as u64;
+            let n = SEARCHES.fetch_add(1, Ordering::Relaxed) + 1;
+            let it = ITERS.fetch_add(iterations as u64, Ordering::Relaxed) + iterations as u64;
+            let r = REACHED.fetch_add(u64::from(reached), Ordering::Relaxed) + u64::from(reached);
+            let c = CAPPED.fetch_add(u64::from(iterations >= max_iters), Ordering::Relaxed)
+                + u64::from(iterations >= max_iters);
+            let t = MICROS.fetch_add(us, Ordering::Relaxed) + us;
+            if n % 5000 == 0 {
+                tracing::info!(
+                    "[NAVDBG] searches={} avg_iters={:.1} reached={:.1}% capped={:.1}% avg_us={:.1} us_per_iter={:.3}",
+                    n,
+                    it as f64 / n as f64,
+                    r as f64 * 100.0 / n as f64,
+                    c as f64 * 100.0 / n as f64,
+                    t as f64 / n as f64,
+                    t as f64 / it.max(1) as f64
+                );
+            }
+        }
 
         for node in self.open_set.drain() {
             closed_set.entry(node.pos.0).or_insert(node);
