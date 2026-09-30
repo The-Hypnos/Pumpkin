@@ -496,6 +496,11 @@ impl MobEntity {
             messages,
         );
         brain.tick(&world, mob, time);
+        // Removed during its own tick, while this lock blocked `clear_brain_on_removal`.
+        if self.living_entity.entity.is_removed() {
+            brain.clear_memories();
+            return;
+        }
         let mut tick = BrainTick {
             brain: &mut brain,
             world: &world,
@@ -503,6 +508,25 @@ impl MobEntity {
             time,
         };
         mob.after_brain_tick(&mut tick);
+    }
+
+    /// Vanilla `LivingEntity.remove` ends with `brain.clearMemories()`. Memories hold strong
+    /// references to other entities; a removed mob that kept them would keep those entities alive,
+    /// and two removed mobs that remember each other would never be freed. Unread inbox messages
+    /// and the goal target hold the same kind of references.
+    pub fn clear_brain_on_removal(&self) {
+        drop(self.take_brain_messages());
+        if let Ok(mut target) = self.target.try_lock() {
+            target.take();
+        }
+        match self.brain.try_lock() {
+            Ok(mut brain) => brain.clear_memories(),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => {
+                poisoned.into_inner().clear_memories();
+            }
+            // Removed during its own brain tick; `tick_brain` clears it when the tick ends.
+            Err(std::sync::TryLockError::WouldBlock) => {}
+        }
     }
 
     /// Builds the mob's brain from its provider, as vanilla does in the constructor.
