@@ -520,12 +520,20 @@ impl PathNavigation {
     }
 
     pub fn set_progress(&mut self, goal: NavigatorGoal) {
+        // Vanilla `createPath` hands back the current path while it still leads to the same
+        // block, so a goal that re-sends its target every tick (tempting, following) doesn't
+        // restart the path and turn the mob back to its first node.
+        let same_target = self.path.as_ref().is_some_and(|path| {
+            !path.is_done() && path.get_target() == BlockPos::floored_v(goal.destination)
+        });
         self.is_idle.store(false, Ordering::Relaxed);
         self.speed_modifier = goal.speed;
         self.last_stuck_check = self.tick_count;
         self.last_stuck_check_pos = goal.current_progress;
         self.current_goal = Some(goal);
-        self.path = None;
+        if !same_target {
+            self.path = None;
+        }
         self.reset_stuck_timeout();
     }
 
@@ -2598,5 +2606,36 @@ impl Deref for Navigator {
 impl DerefMut for Navigator {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut *self.inner
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resending_a_target_in_the_same_block_keeps_the_path() {
+        let target = BlockPos::new(5, 64, 5);
+        let mut navigation = PathNavigation {
+            path: Some(Path::new(
+                vec![Node::new(BlockPos::new(0, 64, 0)), Node::new(target)],
+                target,
+                true,
+            )),
+            ..PathNavigation::default()
+        };
+        let from = Vector3::new(0.5, 64.0, 0.5);
+
+        navigation.set_progress(NavigatorGoal::new(from, Vector3::new(5.3, 64.0, 5.7), 1.0));
+        assert!(
+            navigation.path.is_some(),
+            "same block: the path must survive"
+        );
+
+        navigation.set_progress(NavigatorGoal::new(from, Vector3::new(9.5, 64.0, 5.5), 1.0));
+        assert!(
+            navigation.path.is_none(),
+            "new block: the path must be recomputed"
+        );
     }
 }
