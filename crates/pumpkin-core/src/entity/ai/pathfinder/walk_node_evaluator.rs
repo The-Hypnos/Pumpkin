@@ -433,6 +433,7 @@ impl WalkNodeEvaluator {
 
 impl NodeEvaluator for WalkNodeEvaluator {
     fn prepare(&mut self, context: PathfindingContext, mob_data: MobData) {
+        self.base.nodes.clear();
         self.base.entity_width = mob_data.get_bb_width();
         self.base.entity_height = mob_data.get_bb_height();
         self.base.entity_depth = mob_data.get_bb_width();
