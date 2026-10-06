@@ -30,6 +30,7 @@ use crate::entity::mob::piglin::PiglinEntity;
 use crate::entity::mob::{Mob, MobEntity};
 use crate::entity::player::Player;
 use crate::entity::{Entity, EntityBase};
+use crate::plugin::api::events::entity::piglin_barter::PiglinBarterEvent;
 use crate::world::World;
 use crate::world::loot::LootContextParameters;
 use pumpkin_data::environment_attribute::Activity;
@@ -891,7 +892,13 @@ pub fn stop_holding_off_hand_item(
         let barter_currency = is_barter_currency(&stack);
         if bartering_enabled && barter_currency {
             let response = get_barter_response_items(tick);
-            throw_items(tick, piglin, response);
+            let mut event = PiglinBarterEvent::new(piglin.get_entity().entity_id, stack, response);
+            if let Some(server) = tick.world.server.upgrade() {
+                server.plugin_manager.fire_blocking(&server, &mut event);
+            }
+            if !event.cancelled {
+                throw_items(tick, piglin, event.outcome);
+            }
         } else if !barter_currency && !equip_if_possible(piglin, &stack) {
             put_in_inventory(tick, piglin, stack);
         }
