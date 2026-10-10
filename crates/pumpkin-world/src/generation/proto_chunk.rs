@@ -49,7 +49,6 @@ use crate::generation::structure::placement::should_generate_structure;
 use crate::generation::structure::structures::{
     StructureGeneratorContext, StructureInstance, create_chunk_random,
 };
-use crate::generation::structure::try_generate_structure;
 use crate::generation::surface::rule::try_apply_material_rule;
 use crate::{
     chunk::CHUNK_AREA,
@@ -1374,35 +1373,30 @@ impl ProtoChunk {
         generator: &super::generator::VanillaGenerator,
         height_sampler: &mut dyn crate::generation::structure::structures::HeightSampler,
     ) -> bool {
-        if entry.structure == StructureKeys::Monument {
-            let mut sampler = MultiNoiseSampler::generate(&generator.base_router.multi_noise);
-            let center_x = chunk_pos::get_center_x(self.x);
-            let center_z = chunk_pos::get_center_z(self.z);
-            let start_y = height_sampler.estimate_ocean_floor_height(center_x, center_z);
-            if !crate::generation::structure::structures::ocean_monument::has_valid_biomes(
-                &generator.biome_supplier,
-                &mut sampler,
-                self.x,
-                self.z,
-                sea_level,
-                start_y,
-            ) {
-                return false;
-            }
-        }
-
         let chunk_x = self.x;
         let chunk_z = self.z;
         let position =
             global_cache.get_or_compute_structure_start(entry.structure, chunk_x, chunk_z, || {
-                let structure = Structure::get(&entry.structure);
-                try_generate_structure(
-                    &entry.structure,
-                    structure,
-                    generator.random_config.seed as i64,
-                    self,
+                let seed = generator.random_config.seed as i64;
+                let context = StructureGeneratorContext {
+                    seed,
+                    chunk_x,
+                    chunk_z,
+                    random: create_chunk_random(seed, chunk_x, chunk_z),
                     sea_level,
-                    Some(height_sampler),
+                    min_y: (self.generation_bottom_y() as i32).max(self.bottom_y() as i32),
+                    height: self.generation_height().min(self.height()),
+                    height_sampler: Some(height_sampler),
+                    structure_key: Some(entry.structure),
+                };
+                let mut multi_noise_sampler =
+                    MultiNoiseSampler::generate(&generator.base_router.multi_noise);
+                lazily_generate_structure(
+                    &entry.structure,
+                    Structure::get(&entry.structure),
+                    context,
+                    &generator.biome_supplier,
+                    &mut multi_noise_sampler,
                 )
             });
 
