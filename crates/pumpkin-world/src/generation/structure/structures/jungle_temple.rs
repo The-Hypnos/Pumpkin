@@ -11,7 +11,7 @@ use pumpkin_data::{
 };
 use pumpkin_util::{
     BlockDirection, HeightMap,
-    math::{block_box::BlockBox, position::BlockPos},
+    math::block_box::BlockBox,
     random::{RandomGenerator, RandomImpl},
 };
 
@@ -40,6 +40,10 @@ impl StructureGenerator for JungleTempleGenerator {
         &self,
         mut context: StructureGeneratorContext<'_>,
     ) -> Option<StructurePosition> {
+        if context.lowest_y(WIDTH, DEPTH) < context.sea_level {
+            return None;
+        }
+        let start_pos = context.on_top_of_chunk_center();
         let x = start_block_x(context.chunk_x);
         let z = start_block_z(context.chunk_z);
 
@@ -63,7 +67,7 @@ impl StructureGenerator for JungleTempleGenerator {
         }));
 
         Some(StructurePosition {
-            start_pos: BlockPos::new(x + (WIDTH / 2), 64, z + (DEPTH / 2)),
+            start_pos,
             collector: Arc::new(collector.into()),
         })
     }

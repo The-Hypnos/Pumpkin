@@ -15,7 +15,7 @@ pub use crate::world::WorldPortalExt;
 use crate::{
     ProtoChunk,
     generation::{
-        positions::chunk_pos::{start_block_x, start_block_z},
+        positions::chunk_pos::{get_center_x, get_center_z, start_block_x, start_block_z},
         structure::piece::StructurePieceType,
     },
 };
@@ -889,6 +889,29 @@ pub struct StructureGeneratorContext<'a> {
     pub height: u16,
     pub height_sampler: Option<&'a mut dyn HeightSampler>,
     pub structure_key: Option<pumpkin_data::structures::StructureKeys>,
+}
+
+impl StructureGeneratorContext<'_> {
+    fn first_occupied_surface_height(&mut self, block_x: i32, block_z: i32) -> i32 {
+        self.height_sampler
+            .as_deref_mut()
+            .map_or(self.sea_level, |s| s.estimate_height(block_x, block_z) - 1)
+    }
+
+    pub fn on_top_of_chunk_center(&mut self) -> BlockPos {
+        let x = get_center_x(self.chunk_x);
+        let z = get_center_z(self.chunk_z);
+        BlockPos::new(x, self.first_occupied_surface_height(x, z), z)
+    }
+
+    pub fn lowest_y(&mut self, size_x: i32, size_z: i32) -> i32 {
+        let x = start_block_x(self.chunk_x);
+        let z = start_block_z(self.chunk_z);
+        self.first_occupied_surface_height(x, z)
+            .min(self.first_occupied_surface_height(x, z + size_z))
+            .min(self.first_occupied_surface_height(x + size_x, z))
+            .min(self.first_occupied_surface_height(x + size_x, z + size_z))
+    }
 }
 
 #[must_use]

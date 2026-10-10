@@ -5,11 +5,7 @@ use pumpkin_data::{
     block_properties::{HorizontalFacing, StairsShape, WhiteWoolStairsLikeProperties},
 };
 use pumpkin_nbt::compound::NbtCompound;
-use pumpkin_util::{
-    BlockDirection,
-    math::{block_box::BlockBox, position::BlockPos},
-    random::RandomGenerator,
-};
+use pumpkin_util::{BlockDirection, math::block_box::BlockBox, random::RandomGenerator};
 use serde::Deserialize;
 
 use crate::{
@@ -59,7 +55,7 @@ impl StructureGenerator for SwampHutGenerator {
         }));
 
         Some(StructurePosition {
-            start_pos: BlockPos::new(x, 64, z),
+            start_pos: context.on_top_of_chunk_center(),
             collector: Arc::new(collector.into()),
         })
     }
