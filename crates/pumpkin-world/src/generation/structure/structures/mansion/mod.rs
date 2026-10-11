@@ -58,6 +58,7 @@ impl StructureGenerator for MansionGenerator {
             ]
             .into_iter()
             .min()?
+                - 1
         };
         if y < 60 {
             return None;
@@ -642,7 +643,7 @@ mod tests {
             .unwrap();
         let x = 3 * 16 + 7;
         let z = -2 * 16 + 7;
-        assert_eq!(position.start_pos, BlockPos::new(x, 70, z));
+        assert_eq!(position.start_pos, BlockPos::new(x, 69, z));
         assert_eq!(
             sampler.calls,
             [
