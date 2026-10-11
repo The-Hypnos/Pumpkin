@@ -49,10 +49,7 @@ impl FreezeTopLayerFeature {
                 if top_temp < 0.15 {
                     let top_raw = GenerationCache::get_block_state(chunk, &top_vec);
                     // topPos must be air; belowPos must not be air (something to stand on)
-                    if top_raw.to_state().is_air()
-                        && !below.to_state().is_air()
-                        && !below_block.has_tag(tag::Block::MINECRAFT_CANNOT_SUPPORT_SNOW_LAYER)
-                    {
+                    if top_raw.to_state().is_air() && snow_can_survive_on(below.to_state()) {
                         chunk.set_block_state(&top_vec, Block::SNOW.default_state);
 
                         // Update the `snowy` block-state property on the block below if it has one
@@ -69,4 +66,17 @@ impl FreezeTopLayerFeature {
 
         true
     }
+}
+
+fn snow_can_survive_on(below: &pumpkin_data::BlockState) -> bool {
+    let block = below.id.to_block_id();
+    if block.has_tag(tag::Block::MINECRAFT_CANNOT_SUPPORT_SNOW_LAYER) {
+        return false;
+    }
+    block.has_tag(tag::Block::MINECRAFT_SUPPORT_OVERRIDE_SNOW_LAYER)
+        || below.is_collision_face_full(pumpkin_data::BlockDirection::Up)
+        || (block == BlockId::SNOW
+            && Block::SNOW
+                .properties(below.id)
+                .is_some_and(|props| props.to_props().contains(&("layers", "8"))))
 }
