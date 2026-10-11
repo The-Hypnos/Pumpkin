@@ -232,6 +232,15 @@ impl BlockBox {
         self.max.y - self.min.y + 1
     }
 
+    #[must_use]
+    pub const fn get_center(&self) -> Vector3<i32> {
+        Vector3::new(
+            self.min.x + (self.max.x - self.min.x + 1) / 2,
+            self.min.y + (self.max.y - self.min.y + 1) / 2,
+            self.min.z + (self.max.z - self.min.z + 1) / 2,
+        )
+    }
+
     /// Expands this box to encompass another box.
     ///
     /// # Arguments

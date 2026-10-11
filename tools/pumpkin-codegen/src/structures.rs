@@ -33,6 +33,8 @@ pub struct StructurePlacementStruct {
     pub salt: u32,
     /// Optional exclusion zone to prevent this structure from generating near others.
     pub exclusion_zone: Option<ExclusionZoneStruct>,
+    #[serde(default)]
+    pub locate_offset: [i32; 3],
     /// The specific placement algorithm and its parameters.
     #[serde(flatten)]
     pub r#type: StructurePlacementTypeStruct,
@@ -226,6 +228,7 @@ impl ToTokens for StructurePlacementStruct {
         };
 
         let salt = self.salt;
+        let [ox, oy, oz] = self.locate_offset;
         let placement_type = &self.r#type;
 
         tokens.extend(quote!(
@@ -234,6 +237,7 @@ impl ToTokens for StructurePlacementStruct {
                 frequency: #frequency,
                 salt: #salt,
                 exclusion_zone: #exclusion_zone,
+                locate_offset: [#ox, #oy, #oz],
                 placement_type: #placement_type,
             }
         ));
@@ -746,6 +750,8 @@ pub fn build() -> TokenStream {
     let mut structure_from_name_arms = Vec::new();
     let mut structure_to_name_arms = Vec::new();
     let mut structure_all_names: Vec<String> = Vec::new();
+    let mut structure_step_index_arms = Vec::new();
+    let mut structures_per_step: BTreeMap<&str, usize> = BTreeMap::new();
 
     for (name, structure) in &structures_json {
         let stripped_name = name.strip_prefix("minecraft:").unwrap_or(name);
@@ -769,6 +775,15 @@ pub fn build() -> TokenStream {
             Self::#variant_ident => #name,
         });
         structure_all_names.push(stripped_name.to_string());
+
+        let step_count = structures_per_step
+            .entry(structure.step.as_str())
+            .or_insert(0);
+        let step_index = *step_count;
+        *step_count += 1;
+        structure_step_index_arms.push(quote! {
+            Self::#variant_ident => #step_index,
+        });
     }
 
     let mut structure_set_const_defs = TokenStream::new();
@@ -885,6 +900,13 @@ pub fn build() -> TokenStream {
             pub const fn all_names() -> &'static [&'static str] {
                 &[#(#structure_all_names_tokens),*]
             }
+
+            #[must_use]
+            pub const fn step_index(&self) -> usize {
+                match self {
+                    #(#structure_step_index_arms)*
+                }
+            }
         }
 
         pub struct StructureSet {
@@ -908,6 +930,7 @@ pub fn build() -> TokenStream {
             pub frequency: Option<f32>,
             pub salt: u32,
             pub exclusion_zone: Option<ExclusionZone>,
+            pub locate_offset: [i32; 3],
             pub placement_type: StructurePlacementType,
         }
 

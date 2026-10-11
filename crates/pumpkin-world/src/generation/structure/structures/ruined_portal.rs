@@ -325,7 +325,6 @@ impl RuinedPortalPiece {
                     &mut block_entity_nbt,
                     &mut context,
                     &mut capped_idx,
-                    &mut context_rng,
                 );
             }
 

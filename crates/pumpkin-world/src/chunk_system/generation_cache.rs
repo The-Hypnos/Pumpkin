@@ -321,6 +321,16 @@ impl GenerationCache for Cache {
     }
 
     fn get_top_y(&self, heightmap: &HeightMap, x: i32, z: i32) -> i32 {
+        if matches!(
+            heightmap,
+            HeightMap::WorldSurfaceWg | HeightMap::OceanFloorWg
+        ) {
+            let dx = (x >> 4) - self.x;
+            let dz = (z >> 4) - self.z;
+            if let Chunk::Proto(data) = &self.chunks[(dx * self.size + dz) as usize] {
+                return data.get_top_y(heightmap, x, z);
+            }
+        }
         match heightmap {
             HeightMap::WorldSurfaceWg | HeightMap::WorldSurface => {
                 self.top_block_height_exclusive(x, z)

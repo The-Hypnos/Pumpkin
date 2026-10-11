@@ -1376,10 +1376,7 @@ mod test {
                     chunk_dump.z,
                     expected_start.id
                 );
-                if let Some(crate::generation::structure::structures::StructureInstance::Start(
-                    start,
-                )) = instance
-                {
+                if let Some(start) = instance {
                     assert_eq!(chunk_dump.x, expected_start.chunk_x);
                     assert_eq!(chunk_dump.z, expected_start.chunk_z);
                     let mut collector = start.collector.lock().unwrap();
@@ -1438,10 +1435,7 @@ mod test {
                     chunk_dump.chunk_z,
                     expected_start.id
                 );
-                if let Some(crate::generation::structure::structures::StructureInstance::Start(
-                    start,
-                )) = instance
-                {
+                if let Some(start) = instance {
                     assert_eq!(chunk_dump.chunk_x, expected_start.chunk_x);
                     assert_eq!(chunk_dump.chunk_z, expected_start.chunk_z);
                     let mut collector = start.collector.lock().unwrap();

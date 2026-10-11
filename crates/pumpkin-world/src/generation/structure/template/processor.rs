@@ -8,6 +8,7 @@ use pumpkin_data::{
 };
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
 use pumpkin_util::{
+    HeightMap,
     math::{int_provider::IntProvider, vector3::Vector3},
     random::{RandomImpl, hash_block_pos, legacy_rand::LegacyRand},
 };
@@ -114,6 +115,20 @@ pub enum HeightmapType {
     OceanFloor,
     MotionBlocking,
     MotionBlockingNoLeaves,
+}
+
+impl HeightmapType {
+    #[must_use]
+    pub const fn to_height_map(self) -> HeightMap {
+        match self {
+            Self::WorldSurfaceWg => HeightMap::WorldSurfaceWg,
+            Self::WorldSurface => HeightMap::WorldSurface,
+            Self::OceanFloorWg => HeightMap::OceanFloorWg,
+            Self::OceanFloor => HeightMap::OceanFloor,
+            Self::MotionBlocking => HeightMap::MotionBlocking,
+            Self::MotionBlockingNoLeaves => HeightMap::MotionBlockingNoLeaves,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -387,8 +402,6 @@ impl StructureProcessor {
         let mut nbt = None;
         let mut context = ProcessorContext::default();
         let mut capped_idx = 0;
-        let mut rng =
-            LegacyRand::from_seed(hash_block_pos(world_pos.x, world_pos.y, world_pos.z) as u64);
         self.process_with_context(
             placer,
             world_pos,
@@ -396,12 +409,10 @@ impl StructureProcessor {
             &mut nbt,
             &mut context,
             &mut capped_idx,
-            &mut rng,
         )
     }
 
     #[must_use]
-    #[expect(clippy::too_many_arguments)]
     pub fn process_with_context(
         &self,
         placer: &impl BlockPlacer,
@@ -410,10 +421,12 @@ impl StructureProcessor {
         nbt: &mut Option<NbtCompound>,
         context: &mut ProcessorContext,
         capped_idx: &mut usize,
-        rng: &mut impl RandomImpl,
     ) -> Option<&'static BlockState> {
+        let position_random =
+            || LegacyRand::from_seed(hash_block_pos(world_pos.x, world_pos.y, world_pos.z) as u64);
         match self {
             Self::Rule(rules) => {
+                let rng = &mut position_random();
                 let world_state_id = placer.get_block_state(&world_pos);
                 let world_state = BlockState::from_id(world_state_id);
                 for rule in rules {
@@ -441,9 +454,11 @@ impl StructureProcessor {
                 {
                     return Some(state);
                 }
-                (rng.next_f32() <= *integrity).then_some(state)
+                (position_random().next_f32() <= *integrity).then_some(state)
             }
-            Self::BlockAge { mossiness } => Some(process_block_age(state, *mossiness, rng)),
+            Self::BlockAge { mossiness } => {
+                Some(process_block_age(state, *mossiness, &mut position_random()))
+            }
             Self::BlockIgnore(ignored_blocks) => {
                 if ignored_blocks.iter().any(|ignored| ignored.matches(state)) {
                     None
@@ -493,7 +508,7 @@ impl StructureProcessor {
                         let prev_state = state;
                         let prev_nbt = nbt.clone();
                         let res = delegate.process_with_context(
-                            placer, world_pos, state, nbt, context, capped_idx, rng,
+                            placer, world_pos, state, nbt, context, capped_idx,
                         );
                         if res != Some(prev_state) || *nbt != prev_nbt {
                             context.capped_counts[idx] += 1;
@@ -502,9 +517,8 @@ impl StructureProcessor {
                     }
                     Some(state)
                 } else {
-                    delegate.process_with_context(
-                        placer, world_pos, state, nbt, context, capped_idx, rng,
-                    )
+                    delegate
+                        .process_with_context(placer, world_pos, state, nbt, context, capped_idx)
                 }
             }
         }
@@ -535,13 +549,27 @@ fn get_random_facing_stairs(
     rng: &mut impl RandomImpl,
     stair_block: &'static Block,
 ) -> &'static BlockState {
-    let facings = ["north", "south", "east", "west"];
-    let halves = ["bottom", "top"];
+    let facings = ["north", "east", "south", "west"];
+    let halves = ["top", "bottom"];
     let facing = facings[rng.next_bounded_i32(4) as usize];
     let half = halves[rng.next_bounded_i32(2) as usize];
     let props = [("facing", facing), ("half", half)];
     let state_id = stair_block.from_properties(&props).to_state_id(stair_block);
     BlockState::from_id(state_id)
+}
+
+fn get_random_block(
+    rng: &mut impl RandomImpl,
+    mossiness: f32,
+    non_mossy: &[&'static BlockState; 2],
+    mossy: &[&'static BlockState; 2],
+) -> &'static BlockState {
+    let blocks = if rng.next_f32() < mossiness {
+        mossy
+    } else {
+        non_mossy
+    };
+    blocks[rng.next_bounded_i32(2) as usize]
 }
 
 fn process_block_age(
@@ -553,12 +581,7 @@ fn process_block_age(
 
     if matches!(
         block_id,
-        BlockId::STONE_BRICKS
-            | BlockId::STONE
-            | BlockId::CHISELED_STONE_BRICKS
-            | BlockId::INFESTED_STONE
-            | BlockId::INFESTED_STONE_BRICKS
-            | BlockId::INFESTED_CHISELED_STONE_BRICKS
+        BlockId::STONE_BRICKS | BlockId::STONE | BlockId::CHISELED_STONE_BRICKS
     ) {
         if rng.next_f32() < 0.5 {
             let non_mossy = [
@@ -569,11 +592,7 @@ fn process_block_age(
                 Block::MOSSY_STONE_BRICKS.default_state,
                 get_random_facing_stairs(rng, &Block::MOSSY_STONE_BRICK_STAIRS),
             ];
-            let idx = rng.next_bounded_i32(2) as usize;
-            if rng.next_f32() < mossiness {
-                return mossy[idx];
-            }
-            return non_mossy[idx];
+            return get_random_block(rng, mossiness, &non_mossy, &mossy);
         }
     } else if check_block_has_tag(block_id, "stairs") {
         if rng.next_f32() < 0.5 {
@@ -585,11 +604,7 @@ fn process_block_age(
                 replace_preserving_properties(state, &Block::MOSSY_STONE_BRICK_STAIRS),
                 Block::MOSSY_STONE_BRICK_SLAB.default_state,
             ];
-            let idx = rng.next_bounded_i32(2) as usize;
-            if rng.next_f32() < mossiness {
-                return mossy[idx];
-            }
-            return non_mossy[idx];
+            return get_random_block(rng, mossiness, &non_mossy, &mossy);
         }
     } else if check_block_has_tag(block_id, "slabs") {
         if rng.next_f32() < mossiness {

@@ -4,13 +4,13 @@ use pumpkin_data::{
 };
 
 use crate::{
-    ProtoChunk,
     biome::BiomeSupplier,
     generation::{
         biome_coords,
+        generator::VanillaGenerator,
         noise::router::multi_noise_sampler::MultiNoiseSampler,
         structure::structures::{
-            StructureGenerator, StructureGeneratorContext, StructurePosition,
+            HeightSampler, StructureGenerator, StructureGeneratorContext, StructurePosition,
             buried_treasure::BuriedTreasureGenerator,
             create_chunk_random,
             desert_pyramid::DesertPyramidGenerator,
@@ -150,59 +150,34 @@ pub fn generate_structure_position(
 }
 
 #[must_use]
-pub fn try_generate_structure(
+pub fn generate_structure_start(
+    generator: &VanillaGenerator,
     key: &StructureKeys,
-    structure: &Structure,
-    seed: i64,
-    chunk: &ProtoChunk,
-    sea_level: i32,
-    height_sampler: Option<&mut dyn crate::generation::structure::structures::HeightSampler>,
+    chunk_x: i32,
+    chunk_z: i32,
+    height_sampler: &mut dyn HeightSampler,
 ) -> Option<StructurePosition> {
-    let random = create_chunk_random(seed, chunk.x, chunk.z);
+    let seed = generator.random_config.seed as i64;
+    let shape = &generator.settings.shape;
     let context = StructureGeneratorContext {
         seed,
-        chunk_x: chunk.x,
-        chunk_z: chunk.z,
-        random,
-        sea_level,
-        min_y: (chunk.generation_bottom_y() as i32).max(chunk.bottom_y() as i32),
-        height: chunk.generation_height().min(chunk.height()),
-        height_sampler,
+        chunk_x,
+        chunk_z,
+        random: create_chunk_random(seed, chunk_x, chunk_z),
+        sea_level: generator.settings.sea_level,
+        min_y: (shape.min_y as i32).max(generator.dimension.min_y),
+        height: shape.height.min(generator.dimension.height as u16),
+        height_sampler: Some(height_sampler),
         structure_key: Some(*key),
     };
-    let structure_pos = generate_structure_position(key, structure, context);
-
-    if let Some(pos) = structure_pos {
-        // Get the biome at the structure's starting position.
-        // Clamp biome Y to the chunk's valid range — structure start_pos.y may exceed
-        // the chunk's logical height (e.g. nether fossils use full height 256 but
-        // ProtoChunk only covers logical_height 128).
-        let biome_y = biome_coords::from_block(pos.start_pos.0.y);
-        let biome_height = (chunk.height() >> 2) as i32;
-        let biome_bottom = biome_coords::from_block(chunk.bottom_y() as i32);
-        let clamped_biome_y = biome_y.clamp(biome_bottom, biome_bottom + biome_height - 1);
-
-        let current_biome = chunk.get_biome_id(
-            biome_coords::from_block(pos.start_pos.0.x),
-            clamped_biome_y,
-            biome_coords::from_block(pos.start_pos.0.z),
-        ) as u16;
-
-        let biomes = get_tag_ids(
-            RegistryKey::WorldgenBiome,
-            structure
-                .biomes
-                .strip_prefix('#')
-                .unwrap_or(structure.biomes),
-        )?;
-
-        // Check if the biome is allowed for this structure
-        if biomes.contains(&current_biome) {
-            return Some(pos);
-        }
-    }
-
-    None
+    let mut multi_noise_sampler = MultiNoiseSampler::generate(&generator.base_router.multi_noise);
+    lazily_generate_structure(
+        key,
+        Structure::get(key),
+        context,
+        &generator.biome_supplier,
+        &mut multi_noise_sampler,
+    )
 }
 
 #[must_use]

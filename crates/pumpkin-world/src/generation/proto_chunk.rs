@@ -44,12 +44,10 @@ use crate::generation::noise::router::density_volume::DensityVolume;
 use crate::generation::noise::router::surface_height_sampler::SurfaceHeightSamplerBuilderOptions;
 use crate::generation::noise::{CHUNK_DIM, ChunkNoiseGenerator, LAVA_BLOCK, WATER_BLOCK};
 use crate::generation::section_coords::section_to_block;
-use crate::generation::structure::lazily_generate_structure;
+use crate::generation::structure::generate_structure_start;
 use crate::generation::structure::placement::should_generate_structure;
-use crate::generation::structure::structures::{
-    StructureGeneratorContext, StructureInstance, create_chunk_random,
-};
-use crate::generation::structure::try_generate_structure;
+use crate::generation::structure::structures::{StructurePiecesCollector, StructurePosition};
+
 use crate::generation::surface::rule::try_apply_material_rule;
 use crate::{
     chunk::CHUNK_AREA,
@@ -92,7 +90,170 @@ pub trait GenerationCache: HeightLimitView + BlockAccessor {
     }
 }
 
+pub struct RegionCache<'a>(pub &'a mut dyn GenerationCache);
+
+impl HeightLimitView for RegionCache<'_> {
+    fn height(&self) -> u16 {
+        self.0.height()
+    }
+
+    fn bottom_y(&self) -> i8 {
+        self.0.bottom_y()
+    }
+}
+
+impl BlockAccessor for RegionCache<'_> {
+    fn get_block(&self, position: &BlockPos) -> &'static Block {
+        BlockAccessor::get_block(self.0, position)
+    }
+
+    fn get_block_state(&self, position: &BlockPos) -> &'static BlockState {
+        BlockAccessor::get_block_state(self.0, position)
+    }
+
+    fn get_block_state_id(&self, position: &BlockPos) -> BlockStateId {
+        BlockAccessor::get_block_state_id(self.0, position)
+    }
+
+    fn get_block_and_state(&self, position: &BlockPos) -> (&'static Block, &'static BlockState) {
+        BlockAccessor::get_block_and_state(self.0, position)
+    }
+}
+
+impl GenerationCache for RegionCache<'_> {
+    fn get_center_chunk_mut(&mut self) -> &mut ProtoChunk {
+        self.0.get_center_chunk_mut()
+    }
+
+    fn get_center_chunk(&self) -> &ProtoChunk {
+        self.0.get_center_chunk()
+    }
+
+    fn get_chunk_mut(&mut self, chunk_x: i32, chunk_z: i32) -> Option<&mut ProtoChunk> {
+        self.0.get_chunk_mut(chunk_x, chunk_z)
+    }
+
+    fn get_chunk(&self, chunk_x: i32, chunk_z: i32) -> Option<&ProtoChunk> {
+        self.0.get_chunk(chunk_x, chunk_z)
+    }
+
+    fn try_get_proto_chunk(&self, chunk_x: i32, chunk_z: i32) -> Option<&ProtoChunk> {
+        self.0.try_get_proto_chunk(chunk_x, chunk_z)
+    }
+
+    fn get_block_state(&self, pos: &Vector3<i32>) -> BlockStateId {
+        GenerationCache::get_block_state(self.0, pos)
+    }
+
+    fn get_fluid_and_fluid_state(&self, position: &Vector3<i32>) -> (Fluid, FluidState) {
+        self.0.get_fluid_and_fluid_state(position)
+    }
+
+    fn set_block_state(&mut self, pos: &Vector3<i32>, block_state: &BlockState) {
+        GenerationCache::set_block_state(self.0, pos, block_state);
+    }
+
+    fn add_block_entity(&mut self, pos: &Vector3<i32>, nbt: NbtCompound) {
+        GenerationCache::add_block_entity(self.0, pos, nbt);
+    }
+
+    fn top_motion_blocking_block_height_exclusive(&self, x: i32, z: i32) -> i32 {
+        self.0.top_motion_blocking_block_height_exclusive(x, z)
+    }
+
+    fn top_motion_blocking_block_no_leaves_height_exclusive(&self, x: i32, z: i32) -> i32 {
+        self.0
+            .top_motion_blocking_block_no_leaves_height_exclusive(x, z)
+    }
+
+    fn get_top_y(&self, heightmap: &HeightMap, x: i32, z: i32) -> i32 {
+        self.0.get_top_y(heightmap, x, z)
+    }
+
+    fn top_block_height_exclusive(&self, x: i32, z: i32) -> i32 {
+        self.0.top_block_height_exclusive(x, z)
+    }
+
+    fn ocean_floor_height_exclusive(&self, x: i32, z: i32) -> i32 {
+        self.0.ocean_floor_height_exclusive(x, z)
+    }
+
+    fn is_air(&self, local_pos: &Vector3<i32>) -> bool {
+        self.0.is_air(local_pos)
+    }
+
+    fn get_biome_for_terrain_gen(&self, x: i32, y: i32, z: i32) -> &'static Biome {
+        self.0.get_biome_for_terrain_gen(x, y, z)
+    }
+
+    fn get_blending_data(
+        &self,
+        chunk_x: i32,
+        chunk_z: i32,
+    ) -> Option<&crate::generation::blender::blending_data::BlendingData> {
+        self.0.get_blending_data(chunk_x, chunk_z)
+    }
+
+    fn get_sea_level(&self) -> i32 {
+        self.0.get_sea_level()
+    }
+}
+
 const AIR_BLOCK: Block = Block::AIR;
+
+const STRUCTURE_REFERENCE_RADIUS: i32 = 8;
+
+fn long_open_hash_set_order(keys: &[i64]) -> Vec<usize> {
+    const LOAD_FACTOR: f64 = 0.75;
+    const DEFAULT_EXPECTED: usize = 16;
+    let mix = |x: i64| {
+        let h = x.wrapping_mul(-7_046_029_254_386_353_131);
+        let h = h ^ ((h as u64) >> 32) as i64;
+        h ^ ((h as u64) >> 16) as i64
+    };
+    let array_size = |expected: usize| {
+        ((expected as f64 / LOAD_FACTOR).ceil() as usize)
+            .next_power_of_two()
+            .max(2)
+    };
+    let max_fill = |n: usize| ((n as f64 * LOAD_FACTOR).ceil() as usize).min(n - 1);
+    let insert = |table: &mut [Option<usize>], index: usize| {
+        let mask = table.len() - 1;
+        let mut pos = mix(keys[index]) as usize & mask;
+        while table[pos].is_some() {
+            pos = (pos + 1) & mask;
+        }
+        table[pos] = Some(index);
+    };
+
+    let mut table = vec![None; array_size(DEFAULT_EXPECTED)];
+    let mut null_key = None;
+    let mut size = 0;
+    for (index, &key) in keys.iter().enumerate() {
+        if key == 0 {
+            if null_key.is_some() {
+                continue;
+            }
+            null_key = Some(index);
+        } else {
+            if table.iter().flatten().any(|&i| keys[i] == key) {
+                continue;
+            }
+            insert(&mut table, index);
+        }
+        size += 1;
+        if size > max_fill(table.len()) {
+            let old = std::mem::replace(&mut table, vec![None; array_size(size + 1)]);
+            for index in old.into_iter().rev().flatten() {
+                insert(&mut table, index);
+            }
+        }
+    }
+    null_key
+        .into_iter()
+        .chain(table.into_iter().rev().flatten())
+        .collect()
+}
 
 pub struct StandardChunkFluidLevelSampler {
     top_fluid: FluidLevel,
@@ -135,7 +296,12 @@ pub struct ProtoChunk {
     pub flat_ocean_floor_height_map: [i16; CHUNK_AREA],
     pub flat_motion_blocking_height_map: [i16; CHUNK_AREA],
     pub flat_motion_blocking_no_leaves_height_map: [i16; CHUNK_AREA],
-    pub(crate) structure_starts: FxHashMap<StructureKeys, StructureInstance>,
+    frozen_worldgen_height_maps: Option<Box<[[i16; CHUNK_AREA]; 2]>>,
+    pub(crate) structure_starts: FxHashMap<StructureKeys, StructurePosition>,
+    pub(crate) structure_references: Vec<(
+        StructureKeys,
+        Arc<std::sync::Mutex<StructurePiecesCollector>>,
+    )>,
 
     height: u16,
     bottom_y: i8,
@@ -189,6 +355,7 @@ impl ProtoChunk {
     #[cfg(test)]
     pub(crate) fn has_structure(&self, key: StructureKeys) -> bool {
         self.structure_starts.contains_key(&key)
+            || self.structure_references.iter().any(|(k, _)| *k == key)
     }
 
     #[must_use]
@@ -241,7 +408,9 @@ impl ProtoChunk {
             flat_ocean_floor_height_map: default_heightmap,
             flat_motion_blocking_height_map: default_heightmap,
             flat_motion_blocking_no_leaves_height_map: default_heightmap,
+            frozen_worldgen_height_maps: None,
             structure_starts: FxHashMap::default(),
+            structure_references: Vec::new(),
             height,
             bottom_y,
             generation_height,
@@ -437,28 +606,65 @@ impl ProtoChunk {
         });
     }
 
-    fn maybe_update_surface_height_map(&mut self, index: usize, y: i16) {
-        let current_height = self.flat_surface_height_map[index];
-        self.flat_surface_height_map[index] = current_height.max(y);
+    fn heightmap_predicates(state: &BlockState) -> [bool; 4] {
+        if state.is_air() {
+            return [false; 4];
+        }
+        let block = BlockId::from_state_id(state.id);
+        let blocks_movement = blocks_movement(state, block);
+        let motion_blocking = blocks_movement || state.is_liquid();
+        [
+            true,
+            blocks_movement,
+            motion_blocking,
+            motion_blocking && !block.has_tag(tag::Block::MINECRAFT_LEAVES),
+        ]
     }
 
-    fn maybe_update_ocean_floor_height_map(&mut self, index: usize, y: i16) {
-        let current_height = self.flat_ocean_floor_height_map[index];
-        self.flat_ocean_floor_height_map[index] = current_height.max(y);
-    }
-
-    fn maybe_update_motion_blocking_height_map(&mut self, index: usize, y: i16) {
-        let current_height = self.flat_motion_blocking_height_map[index];
-        self.flat_motion_blocking_height_map[index] = current_height.max(y);
-    }
-
-    fn maybe_update_motion_blocking_no_leaves_height_map(&mut self, index: usize, y: i16) {
-        let current_height = self.flat_motion_blocking_no_leaves_height_map[index];
-        self.flat_motion_blocking_no_leaves_height_map[index] = current_height.max(y);
+    fn prime_heightmaps(&mut self) {
+        let allocated_height = (self.flat_block_map.len() / BlockPalette::VOLUME * 16) as i32;
+        let bottom_y = self.bottom_y() as i32;
+        for local_x in 0..16 {
+            for local_z in 0..16 {
+                let mut heights = [i16::MIN; 4];
+                for local_y in (0..allocated_height).rev() {
+                    let state = self
+                        .get_block_state_raw(local_x, local_y, local_z)
+                        .to_state();
+                    for (height, counts) in
+                        heights.iter_mut().zip(Self::heightmap_predicates(state))
+                    {
+                        if counts && *height == i16::MIN {
+                            *height = (bottom_y + local_y) as i16;
+                        }
+                    }
+                    if !heights.contains(&i16::MIN) {
+                        break;
+                    }
+                }
+                let index = Self::local_position_to_height_map_index(local_x, local_z);
+                self.flat_surface_height_map[index] = heights[0];
+                self.flat_ocean_floor_height_map[index] = heights[1];
+                self.flat_motion_blocking_height_map[index] = heights[2];
+                self.flat_motion_blocking_no_leaves_height_map[index] = heights[3];
+            }
+        }
+        self.frozen_worldgen_height_maps = Some(Box::new([
+            self.flat_surface_height_map,
+            self.flat_ocean_floor_height_map,
+        ]));
     }
 
     #[must_use]
-    pub const fn get_top_y(&self, heightmap: &HeightMap, x: i32, z: i32) -> i32 {
+    pub fn get_top_y(&self, heightmap: &HeightMap, x: i32, z: i32) -> i32 {
+        if let Some(frozen) = &self.frozen_worldgen_height_maps {
+            let index = Self::local_position_to_height_map_index(x & 15, z & 15);
+            match heightmap {
+                HeightMap::WorldSurfaceWg => return i32::from(frozen[0][index]) + 1,
+                HeightMap::OceanFloorWg => return i32::from(frozen[1][index]) + 1,
+                _ => {}
+            }
+        }
         match heightmap {
             HeightMap::WorldSurfaceWg | HeightMap::WorldSurface => {
                 self.top_block_height_exclusive(x, z)
@@ -557,26 +763,6 @@ impl ProtoChunk {
         if local_y < 0 || local_y >= self.height() as i32 {
             return;
         }
-        if !block_state.is_air() {
-            let index = Self::local_position_to_height_map_index(local_x, local_z);
-            let y = y as i16;
-            self.maybe_update_surface_height_map(index, y);
-            let block = BlockId::from_state_id(block_state.id);
-
-            let blocks_movement = blocks_movement(block_state, block);
-            if blocks_movement {
-                self.maybe_update_ocean_floor_height_map(index, y);
-            }
-            if blocks_movement || block_state.is_liquid() {
-                self.maybe_update_motion_blocking_height_map(index, y);
-                if !block.has_tag(tag::Block::MINECRAFT_LEAVES) {
-                    {
-                        self.maybe_update_motion_blocking_no_leaves_height_map(index, y);
-                    }
-                }
-            }
-        }
-
         let index = Self::local_pos_to_block_index(local_x, local_y, local_z);
         if index >= self.flat_block_map.len() {
             if block_state.id == BlockStateId::AIR {
@@ -588,6 +774,40 @@ impl ProtoChunk {
             self.flat_block_map.resize(section_end, BlockStateId::AIR);
         }
         self.flat_block_map[index] = block_state.id;
+        self.update_heightmaps(local_x, local_y, local_z, block_state);
+    }
+
+    fn update_heightmaps(&mut self, local_x: i32, local_y: i32, local_z: i32, state: &BlockState) {
+        let index = Self::local_position_to_height_map_index(local_x, local_z);
+        let bottom_y = self.bottom_y() as i32;
+        let y = (bottom_y + local_y) as i16;
+        for (map, counts) in Self::heightmap_predicates(state).into_iter().enumerate() {
+            let top = self.height_map_mut(map)[index];
+            if counts {
+                if y > top {
+                    self.height_map_mut(map)[index] = y;
+                }
+            } else if y == top {
+                let new_top = (0..local_y)
+                    .rev()
+                    .find(|&below| {
+                        let below_state =
+                            self.get_block_state_raw(local_x, below, local_z).to_state();
+                        Self::heightmap_predicates(below_state)[map]
+                    })
+                    .map_or(i16::MIN, |below| (bottom_y + below) as i16);
+                self.height_map_mut(map)[index] = new_top;
+            }
+        }
+    }
+
+    const fn height_map_mut(&mut self, map: usize) -> &mut [i16; CHUNK_AREA] {
+        match map {
+            0 => &mut self.flat_surface_height_map,
+            1 => &mut self.flat_ocean_floor_height_map,
+            2 => &mut self.flat_motion_blocking_height_map,
+            _ => &mut self.flat_motion_blocking_no_leaves_height_map,
+        }
     }
 
     #[inline]
@@ -638,7 +858,7 @@ impl ProtoChunk {
         let chunk_start_x = self.start_block_x();
         let chunk_start_z = self.start_block_z();
 
-        for (key, instance) in &self.structure_starts {
+        for (key, collector) in &self.structure_references {
             let structure = pumpkin_data::structures::Structure::get(key);
             let terrain_adaptation = structure.terrain_adaptation;
 
@@ -646,11 +866,6 @@ impl ProtoChunk {
             if terrain_adaptation == pumpkin_data::structures::TerrainAdaptation::None {
                 continue;
             }
-
-            let collector = match instance {
-                StructureInstance::Start(pos) => &pos.collector,
-                StructureInstance::Reference(collector) => collector,
-            };
 
             let collector = collector
                 .lock()
@@ -799,6 +1014,7 @@ impl ProtoChunk {
     pub fn step_to_carvers(&mut self, generator: &super::generator::VanillaGenerator) {
         debug_assert_eq!(self.stage, StagedChunkEnum::Surface);
         super::carver::carve(self, generator);
+        self.prime_heightmaps();
 
         self.stage = StagedChunkEnum::Carvers;
     }
@@ -1178,85 +1394,27 @@ impl ProtoChunk {
         population_seed: u64,
         world_seed: i64,
     ) {
-        let mut tasks = Vec::new();
-        {
-            let center_chunk = cache.get_center_chunk();
-            let center_x = center_chunk.x;
-            let center_z = center_chunk.z;
-
-            for (id, instance) in &center_chunk.structure_starts {
-                let s = Structure::get(id);
-                if s.step.ordinal() != step {
-                    continue;
-                }
-
-                match instance {
-                    StructureInstance::Start(pos) => tasks.push(pos.collector.clone()),
-                    StructureInstance::Reference(collector) => {
-                        let collector_arc = collector.clone();
-                        if !tasks.iter().any(|t| Arc::ptr_eq(t, &collector_arc)) {
-                            tasks.push(collector_arc);
-                        }
-                    }
-                }
+        let mut tasks: Vec<_> = cache
+            .get_center_chunk()
+            .structure_references
+            .iter()
+            .filter(|(key, _)| Structure::get(key).step.ordinal() == step)
+            .cloned()
+            .collect();
+        tasks.sort_by_key(|(key, _)| key.step_index());
+        let mut random_key = None;
+        let mut random = RandomGenerator::Worldgen(WorldgenRandom::from_seed(0));
+        for (key, collector_arc) in tasks {
+            if random_key != Some(key) {
+                random_key = Some(key);
+                let seed =
+                    get_decorator_seed(population_seed, key.step_index() as u64, step as u64);
+                random = RandomGenerator::Worldgen(WorldgenRandom::from_seed(seed));
             }
-
-            let radius = 8;
-            for dx in -radius..=radius {
-                for dz in -radius..=radius {
-                    if dx == 0 && dz == 0 {
-                        continue;
-                    }
-
-                    let neighbor_x = center_x + dx;
-                    let neighbor_z = center_z + dz;
-
-                    if let Some(neighbor) = cache.try_get_proto_chunk(neighbor_x, neighbor_z) {
-                        for (id, instance) in &neighbor.structure_starts {
-                            let s = Structure::get(id);
-                            if s.step.ordinal() != step {
-                                continue;
-                            }
-
-                            match instance {
-                                StructureInstance::Start(pos) => {
-                                    let start_x = chunk_pos::start_block_x(center_x);
-                                    let start_z = chunk_pos::start_block_z(center_z);
-                                    let end_x = start_x + 15;
-                                    let end_z = start_z + 15;
-
-                                    if pos
-                                        .get_bounding_box()
-                                        .intersects_raw_xz(start_x, start_z, end_x, end_z)
-                                    {
-                                        let collector_arc = pos.collector.clone();
-                                        if !tasks.iter().any(|t| Arc::ptr_eq(t, &collector_arc)) {
-                                            tasks.push(collector_arc);
-                                        }
-                                    }
-                                }
-                                StructureInstance::Reference(collector) => {
-                                    let collector_arc = collector.clone();
-                                    if !tasks.iter().any(|t| Arc::ptr_eq(t, &collector_arc)) {
-                                        tasks.push(collector_arc);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        let decorator_seed = get_decorator_seed(population_seed, 0, step as u64);
-        let mut random = RandomGenerator::Worldgen(WorldgenRandom::from_seed(decorator_seed));
-
-        let chunk = cache.get_center_chunk_mut();
-        for collector_arc in tasks {
             let mut collector = collector_arc
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            collector.generate_in_chunk(chunk, block_registry, &mut random, world_seed);
+            collector.generate_in_chunk(cache, block_registry, &mut random, world_seed);
         }
     }
 
@@ -1280,7 +1438,7 @@ impl ProtoChunk {
     }
 
     /// Returns the deterministic weighted fallback order for structures in a set.
-    fn weighted_structure_order(
+    pub(crate) fn weighted_structure_order(
         entries: &[WeightedEntry],
         seed: u64,
         chunk_x: i32,
@@ -1316,7 +1474,6 @@ impl ProtoChunk {
     pub fn set_structure_starts(&mut self, generator: &super::generator::VanillaGenerator) {
         debug_assert_eq!(self.stage, StagedChunkEnum::Biomes);
         let random_config = &generator.random_config;
-        let settings = generator.settings;
         let global_cache = &generator.global_structure_cache;
         let calculator = &generator.structure_calculator;
 
@@ -1341,7 +1498,6 @@ impl ProtoChunk {
                 if let Some(entry) = set.structures.first() {
                     self.try_set_structure_start(
                         global_cache,
-                        settings.sea_level,
                         entry,
                         generator,
                         &mut height_sampler,
@@ -1353,7 +1509,6 @@ impl ProtoChunk {
             for entry in Self::weighted_structure_order(set.structures, seed, self.x, self.z) {
                 if self.try_set_structure_start(
                     global_cache,
-                    settings.sea_level,
                     &entry,
                     generator,
                     &mut height_sampler,
@@ -1369,46 +1524,25 @@ impl ProtoChunk {
     fn try_set_structure_start(
         &mut self,
         global_cache: &GlobalStructureCache,
-        sea_level: i32,
         entry: &WeightedEntry,
         generator: &super::generator::VanillaGenerator,
         height_sampler: &mut dyn crate::generation::structure::structures::HeightSampler,
     ) -> bool {
-        if entry.structure == StructureKeys::Monument {
-            let mut sampler = MultiNoiseSampler::generate(&generator.base_router.multi_noise);
-            let center_x = chunk_pos::get_center_x(self.x);
-            let center_z = chunk_pos::get_center_z(self.z);
-            let start_y = height_sampler.estimate_ocean_floor_height(center_x, center_z);
-            if !crate::generation::structure::structures::ocean_monument::has_valid_biomes(
-                &generator.biome_supplier,
-                &mut sampler,
-                self.x,
-                self.z,
-                sea_level,
-                start_y,
-            ) {
-                return false;
-            }
-        }
-
         let chunk_x = self.x;
         let chunk_z = self.z;
         let position =
             global_cache.get_or_compute_structure_start(entry.structure, chunk_x, chunk_z, || {
-                let structure = Structure::get(&entry.structure);
-                try_generate_structure(
+                generate_structure_start(
+                    generator,
                     &entry.structure,
-                    structure,
-                    generator.random_config.seed as i64,
-                    self,
-                    sea_level,
-                    Some(height_sampler),
+                    chunk_x,
+                    chunk_z,
+                    height_sampler,
                 )
             });
 
         if let Some(pos) = position {
-            self.structure_starts
-                .insert(entry.structure, StructureInstance::Start(pos));
+            self.structure_starts.insert(entry.structure, pos);
             return true;
         }
         false
@@ -1419,8 +1553,6 @@ impl ProtoChunk {
     pub fn set_structure_references(&mut self, generator: &super::generator::VanillaGenerator) {
         debug_assert_eq!(self.stage, StagedChunkEnum::StructureStart);
         let random_config = &generator.random_config;
-        let settings = generator.settings;
-        let noise_router = &generator.base_router;
         let global_cache = &generator.global_structure_cache;
         let calculator = &generator.structure_calculator;
 
@@ -1431,22 +1563,10 @@ impl ProtoChunk {
 
         let seed = random_config.seed as i64;
 
-        let base_supplier: &dyn BiomeSupplier = &generator.biome_supplier;
-        let blender = Blender::empty();
-        let biome_supplier = blender.get_biome_supplier(base_supplier);
-        let mut multi_noise_sampler = MultiNoiseSampler::generate(&noise_router.multi_noise);
-
         let mut height_sampler =
             crate::generation::structure::height_sampler::NoiseHeightSampler::new(generator);
 
         let mut references = Vec::new();
-        // Constant across every chunk in the dimension, so hoist it out of the loop
-        // and out of the (cached) structure-start computation below.
-        // Matches vanilla WorldGenerationContext:
-        // minY = Math.max(heightAccessor.getMinY(), generator.getMinY())
-        // height = Math.min(heightAccessor.getHeight(), generator.getGenDepth())
-        let chunk_min_y = (self.generation_bottom_y() as i32).max(self.bottom_y() as i32);
-        let chunk_height = self.generation_height().min(self.height());
 
         for (set_index, set) in StructureSet::ALL.iter().enumerate() {
             if let Some(ref enabled) = generator.enabled_structure_sets
@@ -1459,11 +1579,10 @@ impl ProtoChunk {
 
             match &set.placement.placement_type {
                 StructurePlacementType::RandomSpread(spread) => {
-                    let region_x = pumpkin_util::math::floor_div(self.x, spread.spacing);
-                    let region_z = pumpkin_util::math::floor_div(self.z, spread.spacing);
-
-                    for rx in (region_x - 1)..=(region_x + 1) {
-                        for rz in (region_z - 1)..=(region_z + 1) {
+                    let region = |c: i32| pumpkin_util::math::floor_div(c, spread.spacing);
+                    let reach = STRUCTURE_REFERENCE_RADIUS;
+                    for rx in region(self.x - reach)..=region(self.x + reach) {
+                        for rz in region(self.z - reach)..=region(self.z + reach) {
                             candidate_chunks.push(
                                 crate::generation::structure::placement::get_structure_chunk_in_region(
                                     spread,
@@ -1478,7 +1597,9 @@ impl ProtoChunk {
                 }
                 StructurePlacementType::ConcentricRings(_) => {
                     for &(cx, cz) in global_cache.get_stronghold_chunks() {
-                        if (cx - self.x).abs() <= 8 && (cz - self.z).abs() <= 8 {
+                        if (cx - self.x).abs() <= STRUCTURE_REFERENCE_RADIUS
+                            && (cz - self.z).abs() <= STRUCTURE_REFERENCE_RADIUS
+                        {
                             candidate_chunks.push((cx, cz));
                         }
                     }
@@ -1496,8 +1617,8 @@ impl ProtoChunk {
                     continue;
                 }
 
-                if (candidate_chunk_x - self.x).abs() <= 8
-                    && (candidate_chunk_z - self.z).abs() <= 8
+                if (candidate_chunk_x - self.x).abs() <= STRUCTURE_REFERENCE_RADIUS
+                    && (candidate_chunk_z - self.z).abs() <= STRUCTURE_REFERENCE_RADIUS
                 {
                     let entries = if set.structures.len() == 1 {
                         set.structures.to_vec()
@@ -1511,38 +1632,21 @@ impl ProtoChunk {
                     };
 
                     for entry in entries {
-                        let structure = Structure::get(&entry.structure);
-
                         // A structure's placement depends only on its start chunk and the
                         // world seed, so cache it: otherwise every surrounding chunk whose
                         // references overlap it would re-run the (expensive) jigsaw
-                        // expansion. `context` is only built on a cache miss.
+                        // expansion.
                         let start_data = global_cache.get_or_compute_structure_start(
                             entry.structure,
                             candidate_chunk_x,
                             candidate_chunk_z,
                             || {
-                                let context = StructureGeneratorContext {
-                                    seed,
-                                    chunk_x: candidate_chunk_x,
-                                    chunk_z: candidate_chunk_z,
-                                    random: create_chunk_random(
-                                        seed,
-                                        candidate_chunk_x,
-                                        candidate_chunk_z,
-                                    ),
-                                    sea_level: settings.sea_level,
-                                    min_y: chunk_min_y,
-                                    height: chunk_height,
-                                    height_sampler: Some(&mut height_sampler),
-                                    structure_key: Some(entry.structure),
-                                };
-                                lazily_generate_structure(
+                                generate_structure_start(
+                                    generator,
                                     &entry.structure,
-                                    structure,
-                                    context,
-                                    &biome_supplier,
-                                    &mut multi_noise_sampler,
+                                    candidate_chunk_x,
+                                    candidate_chunk_z,
+                                    &mut height_sampler,
                                 )
                             },
                         );
@@ -1552,7 +1656,11 @@ impl ProtoChunk {
                                 .get_adjusted_bounding_box(&entry.structure)
                                 .intersects_raw_xz(start_x, start_z, end_x, end_z)
                             {
-                                references.push((entry.structure, start_data.collector.clone()));
+                                references.push((
+                                    entry.structure,
+                                    (candidate_chunk_x, candidate_chunk_z),
+                                    start_data.collector.clone(),
+                                ));
                             }
                             break;
                         }
@@ -1561,10 +1669,23 @@ impl ProtoChunk {
             }
         }
 
-        for (key, pos) in references {
-            self.structure_starts
-                .entry(key)
-                .or_insert_with(|| StructureInstance::Reference(pos));
+        references.sort_by_key(|&(_, (x, z), _)| (x, z));
+        let mut keys: Vec<StructureKeys> = Vec::new();
+        for (key, _, _) in &references {
+            if !keys.contains(key) {
+                keys.push(*key);
+            }
+        }
+        for key in keys {
+            let starts: Vec<_> = references.iter().filter(|(k, _, _)| *k == key).collect();
+            let packed: Vec<i64> = starts
+                .iter()
+                .map(|&&(_, (x, z), _)| chunk_pos::packed(x as u64, z as u64) as i64)
+                .collect();
+            for index in long_open_hash_set_order(&packed) {
+                self.structure_references
+                    .push((key, starts[index].2.clone()));
+            }
         }
 
         self.stage = StagedChunkEnum::StructureReferences;
@@ -1617,6 +1738,10 @@ impl BlockPlacer for ProtoChunk {
 
     fn add_block_entity(&mut self, nbt: NbtCompound) {
         self.add_block_entity(nbt);
+    }
+
+    fn get_height(&self, heightmap: &HeightMap, x: i32, z: i32) -> Option<i32> {
+        Some(self.get_top_y(heightmap, x, z))
     }
 }
 
@@ -1691,5 +1816,104 @@ impl GenerationCache for ProtoChunk {
     }
     fn get_sea_level(&self) -> i32 {
         Self::get_sea_level(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::long_open_hash_set_order;
+
+    fn ordered(keys: &[i64]) -> Vec<i64> {
+        long_open_hash_set_order(keys)
+            .into_iter()
+            .map(|i| keys[i])
+            .collect()
+    }
+
+    #[test]
+    fn matches_fastutil_iteration_order() {
+        assert_eq!(
+            ordered(&[
+                -8_589_934_500,
+                -25_769_803_680,
+                8_589_934_692,
+                -21_474_836_380,
+                4_294_967_396,
+                17_179_869_288,
+                -25_769_803_684,
+                -21_474_836_375,
+                -4_294_967_201,
+            ]),
+            [
+                -21_474_836_380,
+                17_179_869_288,
+                -25_769_803_684,
+                8_589_934_692,
+                -21_474_836_375,
+                -25_769_803_680,
+                4_294_967_396,
+                -8_589_934_500,
+                -4_294_967_201,
+            ]
+        );
+    }
+
+    #[test]
+    fn matches_fastutil_order_after_rehash() {
+        assert_eq!(
+            ordered(&[
+                95,
+                -12_884_901_785,
+                4_294_967_391,
+                34_359_738_471,
+                -17_179_869_086,
+                -30_064_770_964,
+                -17_179_869_089,
+                21_474_836_585,
+                -8_589_934_488,
+                -17_179_869_086,
+                -21_474_836_382,
+                12_884_901_989,
+                -34_359_738_260,
+                21_474_836_579,
+                30_064_771_177,
+                30_064_771_169,
+                -8_589_934_497,
+                -17_179_869_084,
+                8_589_934_696,
+                94,
+                -12_884_901_793,
+                34_359_738_462,
+                30_064_771_174,
+                -8_589_934_491,
+                -34_359_738_264,
+            ]),
+            [
+                21_474_836_579,
+                30_064_771_169,
+                -34_359_738_260,
+                21_474_836_585,
+                34_359_738_462,
+                -21_474_836_382,
+                -17_179_869_086,
+                -12_884_901_785,
+                -34_359_738_264,
+                30_064_771_177,
+                30_064_771_174,
+                8_589_934_696,
+                -8_589_934_488,
+                95,
+                -12_884_901_793,
+                94,
+                -17_179_869_084,
+                34_359_738_471,
+                12_884_901_989,
+                4_294_967_391,
+                -30_064_770_964,
+                -8_589_934_497,
+                -17_179_869_089,
+                -8_589_934_491,
+            ]
+        );
     }
 }

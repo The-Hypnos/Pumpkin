@@ -9,6 +9,7 @@ use crate::generation::structure::placement::{
 };
 
 use super::WorldGenerator;
+use crate::ProtoChunk;
 
 /// Block-level position of a found structure plus squared distance from the
 /// search origin, used internally to track the running nearest candidate.
@@ -102,7 +103,6 @@ pub fn find_nearest_structure(
 /// and `/locate structure` use this instead of pointing at a placement-only
 /// candidate whose biome may reject the requested structure.
 #[must_use]
-#[expect(clippy::too_many_lines)]
 pub fn find_nearest_structure_start(
     origin: BlockPos,
     structure_set: &StructureSet,
@@ -110,23 +110,10 @@ pub fn find_nearest_structure_start(
     max_search_radius: i32,
     generator: &WorldGenerator,
 ) -> Option<(BlockPos, pumpkin_data::structures::StructureKeys)> {
-    use crate::{
-        biome::{BiomeSupplier, MultiNoiseBiomeSupplier},
-        generation::{
-            noise::router::{
-                multi_noise_sampler::MultiNoiseSampler,
-                surface_height_sampler::{
-                    SurfaceHeightEstimateSampler, SurfaceHeightSamplerBuilderOptions,
-                },
-            },
-            structure::{
-                lazily_generate_structure,
-                placement::should_generate_structure,
-                structures::{StructureGeneratorContext, create_chunk_random},
-            },
-        },
+    use crate::generation::structure::{
+        generate_structure_start, height_sampler::NoiseHeightSampler,
+        placement::should_generate_structure,
     };
-    use pumpkin_data::structures::Structure;
 
     let WorldGenerator::Noise(noise_generator) = generator else {
         return None;
@@ -144,7 +131,6 @@ pub fn find_nearest_structure_start(
     let global_cache = &noise_generator.global_structure_cache;
 
     for radius in 0..=max_search_radius {
-        let mut nearest: Option<(FoundStructure, pumpkin_data::structures::StructureKeys)> = None;
         for region_x_offset in -radius..=radius {
             for region_z_offset in -radius..=radius {
                 if region_x_offset.abs() != radius && region_z_offset.abs() != radius {
@@ -167,72 +153,37 @@ pub fn find_nearest_structure_start(
                     continue;
                 }
 
-                for &key in target_structures {
+                let order = if structure_set.structures.len() == 1 {
+                    structure_set.structures.to_vec()
+                } else {
+                    ProtoChunk::weighted_structure_order(
+                        structure_set.structures,
+                        world_seed as u64,
+                        chunk_x,
+                        chunk_z,
+                    )
+                };
+                for key in order.into_iter().map(|entry| entry.structure) {
                     let start =
                         global_cache.get_or_compute_structure_start(key, chunk_x, chunk_z, || {
-                            let settings = noise_generator.settings;
-                            let mut height_sampler = SurfaceHeightEstimateSampler::generate(
-                                &noise_generator.base_router.surface_estimator,
-                                &SurfaceHeightSamplerBuilderOptions::new(
-                                    settings.shape.min_y as i32,
-                                    settings.shape.height as i32,
-                                    (settings.shape.height
-                                        / settings.shape.vertical_cell_block_count() as u16)
-                                        as usize,
-                                ),
-                            );
-                            let mut biome_sampler = MultiNoiseSampler::generate(
-                                &noise_generator.base_router.multi_noise,
-                            );
-                            let biome_supplier: &dyn BiomeSupplier =
-                                &MultiNoiseBiomeSupplier::OVERWORLD;
-                            let context = StructureGeneratorContext {
-                                seed: world_seed,
+                            let mut height_sampler = NoiseHeightSampler::new(noise_generator);
+                            generate_structure_start(
+                                noise_generator,
+                                &key,
                                 chunk_x,
                                 chunk_z,
-                                random: create_chunk_random(world_seed, chunk_x, chunk_z),
-                                sea_level: settings.sea_level,
-                                min_y: (settings.shape.min_y as i32)
-                                    .max(noise_generator.dimension.min_y),
-                                height: settings
-                                    .shape
-                                    .height
-                                    .min(noise_generator.dimension.height as u16),
-                                height_sampler: Some(&mut height_sampler),
-                                structure_key: Some(key),
-                            };
-                            lazily_generate_structure(
-                                &key,
-                                Structure::get(&key),
-                                context,
-                                biome_supplier,
-                                &mut biome_sampler,
+                                &mut height_sampler,
                             )
                         });
-                    let Some(_start) = start else {
-                        continue;
-                    };
-                    // Vanilla getLocatePos: chunkPos.getMinBlockX(), 0, chunkPos.getMinBlockZ()
-                    let locate_x = chunk_x << 4;
-                    let locate_z = chunk_z << 4;
-                    let position = BlockPos::new(locate_x, 0, locate_z);
-                    let dx = f64::from(position.0.x - origin.0.x);
-                    let dz = f64::from(position.0.z - origin.0.z);
-                    let found = FoundStructure {
-                        pos: position,
-                        distance_sq: dx * dx + dz * dz,
-                    };
-                    if nearest
-                        .as_ref()
-                        .is_none_or(|(current, _)| found.distance_sq < current.distance_sq)
-                    {
-                        nearest = Some((found, key));
+                    if start.is_some() {
+                        if target_structures.contains(&key) {
+                            // Vanilla getLocatePos: chunkPos.getMinBlockX(), 0, chunkPos.getMinBlockZ()
+                            return Some((BlockPos::new(chunk_x << 4, 0, chunk_z << 4), key));
+                        }
+                        break;
                     }
                 }
             }
-        }
-        if let Some((found, key)) = nearest {
-            return Some((found.pos, key));
         }
     }
     None

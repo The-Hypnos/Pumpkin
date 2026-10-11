@@ -6,6 +6,7 @@ use pumpkin_data::tag::{self, RegistryKey};
 use pumpkin_data::translation;
 use pumpkin_util::PermissionLvl;
 use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::click::ClickEvent;
 use pumpkin_util::text::hover::HoverEvent;
@@ -251,6 +252,9 @@ impl CommandExecutor for LocateStructureExecutor {
                     &world_gen,
                 ),
             };
+
+            let [ox, oy, oz] = set.placement.locate_offset;
+            let nearest = nearest.map(|(pos, key)| (pos.offset(Vector3::new(ox, oy, oz)), key));
 
             if let Some((pos, key)) = nearest
                 && found.as_ref().is_none_or(|(best, _)| {

@@ -15,7 +15,8 @@ pub use crate::world::WorldPortalExt;
 use crate::{
     ProtoChunk,
     generation::{
-        positions::chunk_pos::{start_block_x, start_block_z},
+        positions::chunk_pos::{get_center_x, get_center_z, start_block_x, start_block_z},
+        proto_chunk::GenerationCache,
         structure::piece::StructurePieceType,
     },
 };
@@ -67,6 +68,23 @@ pub trait StructurePieceBase: Send + Sync {
         seed: i64,
         _chunk_box: &BlockBox,
     );
+
+    fn place_in_region(
+        &mut self,
+        region: &mut dyn GenerationCache,
+        block_registry: &dyn WorldPortalExt,
+        random: &mut RandomGenerator,
+        seed: i64,
+        chunk_box: &BlockBox,
+    ) {
+        self.place(
+            region.get_center_chunk_mut(),
+            block_registry,
+            random,
+            seed,
+            chunk_box,
+        );
+    }
 
     #[expect(clippy::too_many_arguments)]
     fn fill_openings(
@@ -387,7 +405,7 @@ impl StructurePiece {
     }
 
     #[must_use]
-    pub const fn is_under_sea_level(
+    pub fn is_under_sea_level(
         &self,
         chunk: &ProtoChunk,
         x: i32,
@@ -422,6 +440,23 @@ impl StructurePiece {
         }
 
         chunk.get_block_state(&block_pos).to_state()
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    pub fn maybe_generate_block(
+        &self,
+        chunk: &mut ProtoChunk,
+        box_limit: &BlockBox,
+        random: &mut RandomGenerator,
+        probability: f32,
+        x: i32,
+        y: i32,
+        z: i32,
+        block: &BlockState,
+    ) {
+        if random.next_f32() < probability {
+            self.add_block(chunk, block, x, y, z, box_limit);
+        }
     }
 
     pub fn add_block(
@@ -708,28 +743,31 @@ impl StructurePiecesCollector {
             .map(|v| v.as_ref() as &dyn StructurePieceBase)
     }
 
-    /// Iterates over all pieces and generates them if they intersect the current chunk.
-    pub fn generate_in_chunk(
-        &mut self,
-        chunk: &mut ProtoChunk,
-        block_registry: &dyn WorldPortalExt,
-        random: &mut RandomGenerator,
-        seed: i64,
-    ) {
+    const fn chunk_box(chunk: &ProtoChunk) -> BlockBox {
         let chunk_x = start_block_x(chunk.x);
         let chunk_z = start_block_z(chunk.z);
-        let chunk_box = BlockBox::new(
+        BlockBox::new(
             chunk_x,
             chunk.bottom_y() as i32,
             chunk_z,
             chunk_x + 15,
             i32::MAX,
             chunk_z + 15,
-        );
+        )
+    }
+
+    pub fn generate_in_chunk(
+        &mut self,
+        region: &mut dyn GenerationCache,
+        block_registry: &dyn WorldPortalExt,
+        random: &mut RandomGenerator,
+        seed: i64,
+    ) {
+        let chunk_box = Self::chunk_box(region.get_center_chunk());
 
         for piece in &mut self.pieces {
             if piece.bounding_box().intersects(&chunk_box) {
-                piece.place(chunk, block_registry, random, seed, &chunk_box);
+                piece.place_in_region(region, block_registry, random, seed, &chunk_box);
             }
         }
     }
@@ -891,6 +929,29 @@ pub struct StructureGeneratorContext<'a> {
     pub structure_key: Option<pumpkin_data::structures::StructureKeys>,
 }
 
+impl StructureGeneratorContext<'_> {
+    fn first_occupied_surface_height(&mut self, block_x: i32, block_z: i32) -> i32 {
+        self.height_sampler
+            .as_deref_mut()
+            .map_or(self.sea_level, |s| s.estimate_height(block_x, block_z) - 1)
+    }
+
+    pub fn on_top_of_chunk_center(&mut self) -> BlockPos {
+        let x = get_center_x(self.chunk_x);
+        let z = get_center_z(self.chunk_z);
+        BlockPos::new(x, self.first_occupied_surface_height(x, z), z)
+    }
+
+    pub fn lowest_y(&mut self, size_x: i32, size_z: i32) -> i32 {
+        let x = start_block_x(self.chunk_x);
+        let z = start_block_z(self.chunk_z);
+        self.first_occupied_surface_height(x, z)
+            .min(self.first_occupied_surface_height(x, z + size_z))
+            .min(self.first_occupied_surface_height(x + size_x, z))
+            .min(self.first_occupied_surface_height(x + size_x, z + size_z))
+    }
+}
+
 #[must_use]
 pub fn create_chunk_random(seed: i64, chunk_x: i32, chunk_z: i32) -> RandomGenerator {
     let mut seeder = LegacyRand::from_seed(seed as u64);
@@ -900,14 +961,6 @@ pub fn create_chunk_random(seed: i64, chunk_x: i32, chunk_z: i32) -> RandomGener
         ^ (i64::from(chunk_z).wrapping_mul(z_multiplier))
         ^ seed;
     RandomGenerator::Legacy(LegacyRand::from_seed(structure_seed as u64))
-}
-
-pub enum StructureInstance {
-    /// This chunk is the "owner" of the structure.
-    Start(StructurePosition),
-    /// This chunk just contains a piece of a structure starting elsewhere.
-    /// Stores the `BlockPos` of the 'Start' so you can look it up.
-    Reference(Arc<Mutex<StructurePiecesCollector>>),
 }
 
 #[cfg(test)]

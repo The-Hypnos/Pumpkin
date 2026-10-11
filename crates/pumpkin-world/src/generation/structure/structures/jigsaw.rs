@@ -1,11 +1,13 @@
 use super::jigsaw_placement::{
     DimensionPadding, JigsawPlacement, LiquidSettings, MaxDistance, PoolAliasLookup,
 };
+use crate::generation::proto_chunk::{GenerationCache, RegionCache};
 use crate::generation::structure::structures::{
     StructureGenerator, StructureGeneratorContext, StructurePieceBase, StructurePosition,
 };
 use crate::generation::structure::template::{
-    BlockMirror, BlockPlacer, BlockRotation, PaletteEntry, StructureTemplate,
+    BlockMirror, BlockPlacer, BlockRotation, PaletteEntry, StructureProcessor, StructureTemplate,
+    processor::HeightmapType,
 };
 use pumpkin_util::math::block_box::BlockBox;
 use pumpkin_util::math::position::BlockPos;
@@ -837,6 +839,7 @@ impl StructurePieceBase for PoolElementStructurePiece {
                     }
                     ProcessorListRef::Empty => Arc::from([]),
                 };
+                let processors = with_projection_processors(processors, self.projection);
                 crate::generation::structure::template::place_template(
                     chunk,
                     &template,
@@ -847,6 +850,7 @@ impl StructurePieceBase for PoolElementStructurePiece {
                     self.liquid_settings == LiquidSettings::ApplyWaterlog,
                     processors.as_ref(),
                     Some(chunk_box),
+                    Some(random),
                 );
                 crate::generation::structure::template::place_template_entities(
                     chunk,
@@ -864,6 +868,41 @@ impl StructurePieceBase for PoolElementStructurePiece {
             placed_feature.generate_in_proto_chunk(
                 chunk,
                 block_registry,
+                feature,
+                random,
+                self.pos,
+            );
+        }
+    }
+
+    fn place_in_region(
+        &mut self,
+        region: &mut dyn GenerationCache,
+        block_registry: &dyn crate::world::WorldPortalExt,
+        random: &mut pumpkin_util::random::RandomGenerator,
+        seed: i64,
+        chunk_box: &pumpkin_util::math::block_box::BlockBox,
+    ) {
+        let Some(feature) = self.element.feature() else {
+            self.place(
+                region.get_center_chunk_mut(),
+                block_registry,
+                random,
+                seed,
+                chunk_box,
+            );
+            return;
+        };
+        if let Some(placed_feature) =
+            crate::generation::feature::placed_features::PLACED_FEATURES.get(&feature)
+        {
+            let chunk = region.get_center_chunk();
+            let (min_y, height) = (chunk.generation_bottom_y(), chunk.generation_height());
+            placed_feature.generate(
+                &mut RegionCache(region),
+                block_registry,
+                min_y,
+                height,
                 feature,
                 random,
                 self.pos,
@@ -898,6 +937,7 @@ pub fn place_pool_element_templates(
                 }
                 ProcessorListRef::Empty => Arc::from([]),
             };
+            let processors = with_projection_processors(processors, piece.projection);
             crate::generation::structure::template::place_template_with_options(
                 placer,
                 &template,
@@ -909,6 +949,7 @@ pub fn place_pool_element_templates(
                 processors.as_ref(),
                 chunk_box,
                 keep_jigsaws,
+                None,
             );
         });
 }
@@ -1065,6 +1106,23 @@ impl StructureGenerator for JigsawGenerator {
             liquid_settings,
             &pool_alias_lookup,
         )
+    }
+}
+
+fn with_projection_processors(
+    processors: Arc<[StructureProcessor]>,
+    projection: JigsawProjection,
+) -> Arc<[StructureProcessor]> {
+    match projection {
+        JigsawProjection::Rigid => processors,
+        JigsawProjection::TerrainMatching => processors
+            .iter()
+            .cloned()
+            .chain(std::iter::once(StructureProcessor::Gravity {
+                heightmap: HeightmapType::WorldSurfaceWg,
+                offset: -1,
+            }))
+            .collect(),
     }
 }
 

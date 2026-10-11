@@ -152,6 +152,7 @@ impl CommandExecutor for PlaceTemplateExecutor {
             false,
             &[],
             None,
+            None,
         );
 
         placer.finalize();

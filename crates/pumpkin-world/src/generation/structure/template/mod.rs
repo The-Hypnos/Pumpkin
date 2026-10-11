@@ -34,10 +34,12 @@ use pumpkin_data::BlockStateId;
 use pumpkin_data::Mirror;
 use pumpkin_data::Rotation;
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
+use pumpkin_util::HeightMap;
 use pumpkin_util::math::vector3::Vector3;
-use pumpkin_util::random::{RandomImpl, hash_block_pos, legacy_rand::LegacyRand};
+use pumpkin_util::random::{RandomGenerator, RandomImpl, hash_block_pos, legacy_rand::LegacyRand};
 
 use crate::ProtoChunk;
+use crate::generation::proto_chunk::GenerationCache;
 
 pub use block_state_resolver::BlockStateResolver;
 pub use cache::{
@@ -61,6 +63,35 @@ pub trait BlockPlacer {
     fn get_block_state(&self, pos: &Vector3<i32>) -> BlockStateId;
     fn set_block_state(&mut self, pos: &Vector3<i32>, state: &BlockState);
     fn add_block_entity(&mut self, nbt: NbtCompound);
+
+    fn get_height(&self, _heightmap: &HeightMap, _x: i32, _z: i32) -> Option<i32> {
+        None
+    }
+}
+
+pub struct RegionPlacer<'a>(pub &'a mut dyn GenerationCache);
+
+impl BlockPlacer for RegionPlacer<'_> {
+    fn get_block_state(&self, pos: &Vector3<i32>) -> BlockStateId {
+        GenerationCache::get_block_state(self.0, pos)
+    }
+
+    fn set_block_state(&mut self, pos: &Vector3<i32>, state: &BlockState) {
+        self.0.set_block_state(pos, state);
+    }
+
+    fn add_block_entity(&mut self, nbt: NbtCompound) {
+        let pos = Vector3::new(
+            nbt.get_int("x").unwrap_or_default(),
+            nbt.get_int("y").unwrap_or_default(),
+            nbt.get_int("z").unwrap_or_default(),
+        );
+        self.0.add_block_entity(&pos, nbt);
+    }
+
+    fn get_height(&self, heightmap: &HeightMap, x: i32, z: i32) -> Option<i32> {
+        Some(self.0.get_top_y(heightmap, x, z))
+    }
 }
 
 /// Places a template at a world origin with an un-rotated XZ offset.
@@ -84,6 +115,7 @@ pub fn place_template(
     apply_waterlogging: bool,
     processors: &[StructureProcessor],
     chunk_box: Option<&pumpkin_util::math::block_box::BlockBox>,
+    loot_random: Option<&mut RandomGenerator>,
 ) {
     place_template_with_options(
         placer,
@@ -96,6 +128,7 @@ pub fn place_template(
         processors,
         chunk_box,
         false,
+        loot_random,
     );
 }
 
@@ -111,6 +144,7 @@ pub fn place_template_with_options(
     processors: &[StructureProcessor],
     chunk_box: Option<&pumpkin_util::math::block_box::BlockBox>,
     keep_jigsaws: bool,
+    mut loot_random: Option<&mut RandomGenerator>,
 ) {
     let (rotated_ox, rotated_oz) = rotation.rotate_offset(offset.0, offset.1);
     let world_x = origin.x + rotated_ox;
@@ -147,9 +181,8 @@ pub fn place_template_with_options(
             continue;
         }
 
-        // Resolve block state with rotation applied to directional properties
         let Some(mut state) =
-            BlockStateResolver::resolve(&placed_entry, rotation, Mirror::default())
+            BlockStateResolver::resolve(&placed_entry, Rotation::None, Mirror::default())
         else {
             continue;
         };
@@ -172,29 +205,20 @@ pub fn place_template_with_options(
             continue;
         }
 
-        let world_pos = Vector3::new(wx, wy, wz);
-
-        if apply_waterlogging
-            && placer.get_block_state(&world_pos).to_block_id() == pumpkin_data::Block::WATER.id
-            && let Some((_, waterlogged)) = placed_entry
-                .properties
-                .iter_mut()
-                .find(|(name, _)| name == "waterlogged")
-        {
-            *waterlogged = "true".to_string();
-            if let Some(waterlogged_state) =
-                BlockStateResolver::resolve(&placed_entry, rotation, Mirror::default())
-            {
-                state = waterlogged_state;
-            }
-        }
+        let mut world_pos = Vector3::new(wx, wy, wz);
 
         // Apply processors
         let mut should_place = true;
         let mut capped_idx = 0;
-        let mut rng =
-            LegacyRand::from_seed(hash_block_pos(world_pos.x, world_pos.y, world_pos.z) as u64);
         for processor in processors {
+            if let processor::StructureProcessor::Gravity { heightmap, offset } = processor {
+                if let Some(height) =
+                    placer.get_height(&heightmap.to_height_map(), world_pos.x, world_pos.z)
+                {
+                    world_pos.y = height + offset + block.pos.y;
+                }
+                continue;
+            }
             let Some(processed_state) = processor.process_with_context(
                 placer,
                 world_pos,
@@ -202,7 +226,6 @@ pub fn place_template_with_options(
                 &mut block_entity_nbt,
                 &mut context,
                 &mut capped_idx,
-                &mut rng,
             ) else {
                 should_place = false;
                 break;
@@ -212,12 +235,20 @@ pub fn place_template_with_options(
         if !should_place {
             continue;
         }
+        state = state.rotate(rotation);
         // Legacy pool elements ignore air after jigsaw replacement and custom processors.
         if skip_air && state.id.to_block_id() == pumpkin_data::Block::AIR.id {
             continue;
         }
 
-        placer.set_block_state(&Vector3::new(wx, wy, wz), state);
+        if apply_waterlogging
+            && holds_water_source(placer.get_block_state(&world_pos))
+            && let Some(waterlogged) = state.set_waterlogged(true)
+        {
+            state = waterlogged;
+        }
+
+        placer.set_block_state(&world_pos, state);
 
         // Create block entities for interactive blocks (furnaces, chests, etc.)
         let final_block = pumpkin_data::Block::from_id(state.id.to_block_id());
@@ -227,9 +258,9 @@ pub fn place_template_with_options(
             let mut placed_nbt = NbtCompound::new();
 
             placed_nbt.put_string("id", fallback_id.to_string());
-            placed_nbt.put_int("x", wx);
-            placed_nbt.put_int("y", wy);
-            placed_nbt.put_int("z", wz);
+            placed_nbt.put_int("x", world_pos.x);
+            placed_nbt.put_int("y", world_pos.y);
+            placed_nbt.put_int("z", world_pos.z);
 
             if let Some(template_nbt) = &block_entity_nbt {
                 for (key, value) in &template_nbt.child_tags {
@@ -239,10 +270,17 @@ pub fn place_template_with_options(
                 }
             }
 
-            if placed_nbt.get_string("LootTable").is_some()
+            if let Some(random) = loot_random.as_deref_mut() {
+                if block_entity_nbt.is_some() && is_randomizable_container(fallback_id) {
+                    placed_nbt.put_long("LootTableSeed", random.next_i64());
+                }
+            } else if placed_nbt.get_string("LootTable").is_some()
                 && placed_nbt.get_long("LootTableSeed").is_none()
             {
-                let mut random = LegacyRand::from_seed(hash_block_pos(wx, wy, wz) as u64);
+                let mut random =
+                    LegacyRand::from_seed(
+                        hash_block_pos(world_pos.x, world_pos.y, world_pos.z) as u64
+                    );
                 placed_nbt.put_long("LootTableSeed", random.next_i64());
             }
 
@@ -317,6 +355,20 @@ pub(crate) fn place_template_entities(
 }
 
 /// Returns the block entity ID for blocks that require one, or None if not needed.
+fn is_randomizable_container(block_entity_id: &str) -> bool {
+    matches!(
+        block_entity_id,
+        "minecraft:chest"
+            | "minecraft:trapped_chest"
+            | "minecraft:barrel"
+            | "minecraft:crafter"
+            | "minecraft:decorated_pot"
+            | "minecraft:dispenser"
+            | "minecraft:dropper"
+            | "minecraft:hopper"
+    ) || block_entity_id.ends_with("shulker_box")
+}
+
 pub(crate) fn get_block_entity_id(block_name: &str) -> Option<&'static str> {
     let name = block_name.strip_prefix("minecraft:").unwrap_or(block_name);
     match name {
@@ -379,6 +431,28 @@ pub(crate) fn get_block_entity_id(block_name: &str) -> Option<&'static str> {
     }
 }
 
+#[must_use]
+pub fn holds_water(id: BlockStateId) -> bool {
+    let block = id.to_block_id();
+    block == pumpkin_data::Block::WATER.id
+        || id.is_waterlogged()
+        || [
+            pumpkin_data::Block::SEAGRASS.id,
+            pumpkin_data::Block::TALL_SEAGRASS.id,
+            pumpkin_data::Block::KELP.id,
+            pumpkin_data::Block::KELP_PLANT.id,
+            pumpkin_data::Block::BUBBLE_COLUMN.id,
+        ]
+        .contains(&block)
+}
+
+#[must_use]
+pub fn holds_water_source(id: BlockStateId) -> bool {
+    holds_water(id)
+        && (id.to_block_id() != pumpkin_data::Block::WATER.id
+            || id == pumpkin_data::Block::WATER.default_state.id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,6 +491,7 @@ mod tests {
                 false,
                 false,
                 &[],
+                None,
                 None,
             );
 
