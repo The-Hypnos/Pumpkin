@@ -76,7 +76,7 @@ impl StructurePieceBase for LeftTurnPiece {
         _has_portal_room: &mut bool,
 
         collector: &mut StructurePiecesCollector,
-        pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        pieces_to_process: &mut Vec<usize>,
     ) {
         let facing = self.piece.piece.facing.unwrap_or(BlockDirection::North);
 
@@ -117,7 +117,7 @@ impl StructurePieceBase for LeftTurnPiece {
         let box_limit = *chunk_box;
         let p = &self.piece;
         let inner = &p.piece;
-        let air = Block::AIR.default_state;
+        let air = Block::CAVE_AIR.default_state;
 
         inner.fill_outline_random(
             0,

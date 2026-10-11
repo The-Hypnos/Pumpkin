@@ -16,7 +16,7 @@ use crate::{
             StructurePiece, StructurePieceBase, StructurePiecesCollector,
             stronghold::{
                 EntranceType, PieceWeight, StoneBrickRandomizer, StrongholdPiece,
-                StrongholdPieceType,
+                StrongholdPieceType, wall_torch,
             },
         },
     },
@@ -88,7 +88,7 @@ impl StructurePieceBase for SquareRoomPiece {
         _has_portal_room: &mut bool,
 
         collector: &mut StructurePiecesCollector,
-        pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        pieces_to_process: &mut Vec<usize>,
     ) {
         // 1. Forward Opening
         // Java: this.fillForwardOpening((Start)start, holder, random, 4, 1);
@@ -131,6 +131,7 @@ impl StructurePieceBase for SquareRoomPiece {
         );
     }
 
+    #[expect(clippy::too_many_lines)]
     fn place(
         &mut self,
         chunk: &mut ProtoChunk,
@@ -143,7 +144,7 @@ impl StructurePieceBase for SquareRoomPiece {
         let box_limit = *chunk_box;
         let p = &self.piece;
         let inner = &p.piece;
-        let air = Block::AIR.default_state;
+        let air = Block::CAVE_AIR.default_state;
 
         // 1. Main Outline (10x6x10) - Matches Java: fillWithOutline(..., 0,0,0, 10,6,10, ...)
         inner.fill_outline_random(
@@ -165,13 +166,13 @@ impl StructurePieceBase for SquareRoomPiece {
         p.generate_entrance(chunk, &box_limit, self.piece.entry_door, 4, 1, 0);
 
         // 3. Clear Exits
-        // Forward Exit (Z=10) -> fillWithOutline(..., 4,1,10, 6,3,10, AIR, AIR, false)
+        // Forward Exit (Z=10) -> fillWithOutline(..., 4,1,10, 6,3,10, CAVE_AIR, CAVE_AIR, false)
         inner.fill_with_outline(chunk, &box_limit, false, 4, 1, 10, 6, 3, 10, air, air);
 
-        // Left Side Exit (X=0) -> fillWithOutline(..., 0,1,4, 0,3,6, AIR, AIR, false)
+        // Left Side Exit (X=0) -> fillWithOutline(..., 0,1,4, 0,3,6, CAVE_AIR, CAVE_AIR, false)
         inner.fill_with_outline(chunk, &box_limit, false, 0, 1, 4, 0, 3, 6, air, air);
 
-        // Right Side Exit (X=10) -> fillWithOutline(..., 10,1,4, 10,3,6, AIR, AIR, false)
+        // Right Side Exit (X=10) -> fillWithOutline(..., 10,1,4, 10,3,6, CAVE_AIR, CAVE_AIR, false)
         inner.fill_with_outline(chunk, &box_limit, false, 10, 1, 4, 10, 3, 6, air, air);
 
         // 4. Room Specific Decorations
@@ -185,11 +186,38 @@ impl StructurePieceBase for SquareRoomPiece {
                 inner.add_block(chunk, stone_brick, 5, 2, 5, &box_limit);
                 inner.add_block(chunk, stone_brick, 5, 3, 5, &box_limit);
 
-                // // Torches
-                // inner.add_block(chunk, &Block::WALL_TORCH.default_state.with("facing", "west"), 4, 3, 5, &box_limit);
-                // inner.add_block(chunk, &Block::WALL_TORCH.default_state.with("facing", "east"), 6, 3, 5, &box_limit);
-                // inner.add_block(chunk, &Block::WALL_TORCH.default_state.with("facing", "south"), 5, 3, 4, &box_limit);
-                // inner.add_block(chunk, &Block::WALL_TORCH.default_state.with("facing", "north"), 5, 3, 6, &box_limit);
+                inner.add_block(
+                    chunk,
+                    wall_torch(HorizontalFacing::West),
+                    4,
+                    3,
+                    5,
+                    &box_limit,
+                );
+                inner.add_block(
+                    chunk,
+                    wall_torch(HorizontalFacing::East),
+                    6,
+                    3,
+                    5,
+                    &box_limit,
+                );
+                inner.add_block(
+                    chunk,
+                    wall_torch(HorizontalFacing::South),
+                    5,
+                    3,
+                    4,
+                    &box_limit,
+                );
+                inner.add_block(
+                    chunk,
+                    wall_torch(HorizontalFacing::North),
+                    5,
+                    3,
+                    6,
+                    &box_limit,
+                );
 
                 // Floor Pattern (Slabs)
                 inner.add_block(chunk, smooth_slab, 4, 1, 4, &box_limit);

@@ -1,4 +1,4 @@
-use pumpkin_data::Block;
+use pumpkin_data::{Block, block_properties::HorizontalFacing};
 use pumpkin_util::{
     BlockDirection,
     math::block_box::BlockBox,
@@ -13,7 +13,7 @@ use crate::{
             StructurePiece, StructurePieceBase, StructurePiecesCollector,
             stronghold::{
                 EntranceType, PieceWeight, StoneBrickRandomizer, StrongholdPiece,
-                StrongholdPieceType,
+                StrongholdPieceType, wall_torch,
             },
         },
     },
@@ -82,7 +82,7 @@ impl StructurePieceBase for CorridorPiece {
         _has_portal_room: &mut bool,
 
         collector: &mut StructurePiecesCollector,
-        pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        pieces_to_process: &mut Vec<usize>,
     ) {
         self.piece.fill_forward_opening(
             start,
@@ -135,7 +135,7 @@ impl StructurePieceBase for CorridorPiece {
         let box_limit = *chunk_box;
         let p = &self.piece;
         let inner = &p.piece;
-        let air = Block::AIR.default_state;
+        let air = Block::CAVE_AIR.default_state;
 
         inner.fill_outline_random(
             0,
@@ -154,13 +154,12 @@ impl StructurePieceBase for CorridorPiece {
         p.generate_entrance(chunk, &box_limit, self.piece.entry_door, 1, 1, 0);
         p.generate_entrance(chunk, &box_limit, EntranceType::Opening, 1, 1, 6);
 
-        // let torch_east = Block::WALL_TORCH.default_state.with("facing", "east");
-        // let torch_west = Block::WALL_TORCH.default_state.with("facing", "west");
-
-        // inner.add_block_with_random_threshold(chunk, &box_limit, random, 0.1, 1, 2, 1, &torch_east);
-        // inner.add_block_with_random_threshold(chunk, &box_limit, random, 0.1, 3, 2, 1, &torch_west);
-        // inner.add_block_with_random_threshold(chunk, &box_limit, random, 0.1, 1, 2, 5, &torch_east);
-        // inner.add_block_with_random_threshold(chunk, &box_limit, random, 0.1, 3, 2, 5, &torch_west);
+        let torch_east = wall_torch(HorizontalFacing::East);
+        let torch_west = wall_torch(HorizontalFacing::West);
+        inner.maybe_generate_block(chunk, &box_limit, random, 0.1, 1, 2, 1, torch_east);
+        inner.maybe_generate_block(chunk, &box_limit, random, 0.1, 3, 2, 1, torch_west);
+        inner.maybe_generate_block(chunk, &box_limit, random, 0.1, 1, 2, 5, torch_east);
+        inner.maybe_generate_block(chunk, &box_limit, random, 0.1, 3, 2, 5, torch_west);
 
         if self.left_exit {
             inner.fill_with_outline(chunk, &box_limit, false, 0, 1, 2, 0, 3, 4, air, air);

@@ -1,4 +1,9 @@
-use pumpkin_data::{Block, BlockState, block_properties::OakFenceLikeProperties};
+use pumpkin_data::{
+    Block, BlockState,
+    block_properties::{
+        DoubleBlockHalf, HorizontalFacing, OakDoorLikeProperties, OakFenceLikeProperties,
+    },
+};
 use pumpkin_util::{
     BlockDirection,
     math::block_box::BlockBox,
@@ -77,7 +82,7 @@ impl StructurePieceBase for PrisonHallPiece {
         _has_portal_room: &mut bool,
 
         collector: &mut StructurePiecesCollector,
-        pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        pieces_to_process: &mut Vec<usize>,
     ) {
         // Prison hall usually only has one forward exit
         self.piece.fill_forward_opening(
@@ -93,6 +98,7 @@ impl StructurePieceBase for PrisonHallPiece {
         );
     }
 
+    #[expect(clippy::too_many_lines)]
     fn place(
         &mut self,
         chunk: &mut ProtoChunk,
@@ -105,7 +111,7 @@ impl StructurePieceBase for PrisonHallPiece {
         let box_limit = *chunk_box;
         let p = &self.piece;
         let inner = &p.piece;
-        let air = Block::AIR.default_state;
+        let air = Block::CAVE_AIR.default_state;
 
         // 1. Main Shell 9x5x11
         inner.fill_outline_random(
@@ -212,16 +218,14 @@ impl StructurePieceBase for PrisonHallPiece {
         inner.add_block(chunk, bar_ns, 4, 3, 2, &box_limit);
         inner.add_block(chunk, bar_ns, 4, 3, 8, &box_limit);
 
-        // // 6. Iron Doors (2-block high structure)
-        // let door_bottom = Block::IRON_DOOR.default_state.with("facing", "west").with("half", "lower");
-        // let door_top = Block::IRON_DOOR.default_state.with("facing", "west").with("half", "upper");
-
-        // // Door 1
-        // inner.add_block(chunk, &door_bottom, 4, 1, 2, &box_limit);
-        // inner.add_block(chunk, &door_top, 4, 2, 2, &box_limit);
-
-        // // Door 2
-        // inner.add_block(chunk, &door_bottom, 4, 1, 8, &box_limit);
-        // inner.add_block(chunk, &door_top, 4, 2, 8, &box_limit);
+        let mut door = OakDoorLikeProperties::default(&Block::IRON_DOOR);
+        door.facing = HorizontalFacing::West;
+        let door_bottom = BlockState::from_id(door.to_state_id(&Block::IRON_DOOR));
+        door.half = DoubleBlockHalf::Upper;
+        let door_top = BlockState::from_id(door.to_state_id(&Block::IRON_DOOR));
+        inner.add_block(chunk, door_bottom, 4, 1, 2, &box_limit);
+        inner.add_block(chunk, door_top, 4, 2, 2, &box_limit);
+        inner.add_block(chunk, door_bottom, 4, 1, 8, &box_limit);
+        inner.add_block(chunk, door_top, 4, 2, 8, &box_limit);
     }
 }

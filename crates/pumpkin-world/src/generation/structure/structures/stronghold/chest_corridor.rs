@@ -80,7 +80,7 @@ impl StructurePieceBase for ChestCorridorPiece {
         _has_portal_room: &mut bool,
 
         collector: &mut StructurePiecesCollector,
-        pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        pieces_to_process: &mut Vec<usize>,
     ) {
         self.piece.fill_forward_opening(
             start,

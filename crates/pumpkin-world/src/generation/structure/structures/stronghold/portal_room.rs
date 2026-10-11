@@ -86,7 +86,7 @@ impl StructurePieceBase for PortalRoomPiece {
         has_portal_room: &mut bool,
 
         _collector: &mut StructurePiecesCollector,
-        _pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        _pieces_to_process: &mut Vec<usize>,
     ) {
         *has_portal_room = true;
     }

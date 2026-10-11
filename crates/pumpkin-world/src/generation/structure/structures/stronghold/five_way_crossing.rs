@@ -1,6 +1,6 @@
 use pumpkin_data::{
     Block, BlockState,
-    block_properties::{SlabType, WhiteWoolSlabLikeProperties},
+    block_properties::{HorizontalFacing, SlabType, WhiteWoolSlabLikeProperties},
 };
 use pumpkin_util::{
     BlockDirection,
@@ -16,7 +16,7 @@ use crate::{
             StructurePiece, StructurePieceBase, StructurePiecesCollector,
             stronghold::{
                 EntranceType, PieceWeight, StoneBrickRandomizer, StrongholdPiece,
-                StrongholdPieceType,
+                StrongholdPieceType, wall_torch,
             },
         },
     },
@@ -89,7 +89,7 @@ impl StructurePieceBase for FiveWayCrossingPiece {
         _has_portal_room: &mut bool,
 
         collector: &mut StructurePiecesCollector,
-        pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        pieces_to_process: &mut Vec<usize>,
     ) {
         let mut i = 3;
         let mut j = 5;
@@ -176,7 +176,7 @@ impl StructurePieceBase for FiveWayCrossingPiece {
         let box_limit = *chunk_box;
         let p = &self.piece;
         let inner = &p.piece;
-        let air = Block::AIR.default_state;
+        let air = Block::CAVE_AIR.default_state;
 
         inner.fill_outline_random(
             0,
@@ -316,7 +316,13 @@ impl StructurePieceBase for FiveWayCrossingPiece {
             double_slab,
         );
 
-        // let torch = Block::WALL_TORCH.default_state.with("facing", "south");
-        // inner.add_block(chunk, &torch, 6, 5, 6, &box_limit);
+        inner.add_block(
+            chunk,
+            wall_torch(HorizontalFacing::South),
+            6,
+            5,
+            6,
+            &box_limit,
+        );
     }
 }

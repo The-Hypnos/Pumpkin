@@ -1,6 +1,6 @@
 use pumpkin_data::{
     Block, BlockState,
-    block_properties::{HorizontalFacing, LadderLikeProperties},
+    block_properties::{HorizontalFacing, LadderLikeProperties, OakFenceLikeProperties},
 };
 use pumpkin_util::{
     BlockDirection,
@@ -14,10 +14,20 @@ use crate::{
         piece::StructurePieceType,
         structures::{
             StructurePiece, StructurePieceBase, StructurePiecesCollector,
-            stronghold::{EntranceType, StoneBrickRandomizer, StrongholdPiece},
+            stronghold::{EntranceType, StoneBrickRandomizer, StrongholdPiece, wall_torch},
         },
     },
 };
+
+#[expect(clippy::fn_params_excessive_bools)]
+fn oak_fence(north: bool, east: bool, south: bool, west: bool) -> &'static BlockState {
+    let mut props = OakFenceLikeProperties::default(&Block::OAK_FENCE);
+    props.north = north;
+    props.east = east;
+    props.south = south;
+    props.west = west;
+    BlockState::from_id(props.to_state_id(&Block::OAK_FENCE))
+}
 
 pub struct LibraryPiece {
     pub piece: StrongholdPiece,
@@ -128,8 +138,8 @@ impl StructurePieceBase for LibraryPiece {
         // 4. Bookshelves, Pillars, and Wall Torches
         let planks = Block::OAK_PLANKS.default_state;
         let books = Block::BOOKSHELF.default_state;
-        // let torch_e = Block::WALL_TORCH.default_state.with("facing", "east");
-        // let torch_w = Block::WALL_TORCH.default_state.with("facing", "west");
+        let torch_e = wall_torch(HorizontalFacing::East);
+        let torch_w = wall_torch(HorizontalFacing::West);
 
         for l in 1..=13 {
             if (l - 1) % 4 == 0 {
@@ -138,9 +148,8 @@ impl StructurePieceBase for LibraryPiece {
                 inner.fill_with_outline(
                     chunk, &box_limit, false, 12, 1, l, 12, 4, l, planks, planks,
                 );
-                // Torches
-                // inner.add_block(chunk, &torch_e, 2, 3, l, &box_limit);
-                // inner.add_block(chunk, &torch_w, 11, 3, l, &box_limit);
+                inner.add_block(chunk, torch_e, 2, 3, l, &box_limit);
+                inner.add_block(chunk, torch_w, 11, 3, l, &box_limit);
 
                 if self.tall {
                     inner.fill_with_outline(
@@ -186,27 +195,65 @@ impl StructurePieceBase for LibraryPiece {
             inner.add_block(chunk, planks, 8, 5, 11, &box_limit);
             inner.add_block(chunk, planks, 9, 5, 10, &box_limit);
 
-            // Fences / Railings
-            // let f_ns = Block::OAK_FENCE.default_state.with("north", "true").with("south", "true");
-            // let f_ew = Block::OAK_FENCE.default_state.with("east", "true").with("west", "true");
+            let we_fence = oak_fence(false, true, false, true);
+            let ns_fence = oak_fence(true, false, true, false);
+            inner.fill_with_outline(
+                chunk, &box_limit, false, 3, 6, 3, 3, 6, 11, ns_fence, ns_fence,
+            );
+            inner.fill_with_outline(
+                chunk, &box_limit, false, 10, 6, 3, 10, 6, 9, ns_fence, ns_fence,
+            );
+            inner.fill_with_outline(
+                chunk, &box_limit, false, 4, 6, 2, 9, 6, 2, we_fence, we_fence,
+            );
+            inner.fill_with_outline(
+                chunk, &box_limit, false, 4, 6, 12, 7, 6, 12, we_fence, we_fence,
+            );
+            inner.add_block(
+                chunk,
+                oak_fence(true, true, false, false),
+                3,
+                6,
+                2,
+                &box_limit,
+            );
+            inner.add_block(
+                chunk,
+                oak_fence(false, true, true, false),
+                3,
+                6,
+                12,
+                &box_limit,
+            );
+            inner.add_block(
+                chunk,
+                oak_fence(true, false, false, true),
+                10,
+                6,
+                2,
+                &box_limit,
+            );
+            for i in 0..=2 {
+                inner.add_block(
+                    chunk,
+                    oak_fence(false, false, true, true),
+                    8 + i,
+                    6,
+                    12 - i,
+                    &box_limit,
+                );
+                if i != 2 {
+                    inner.add_block(
+                        chunk,
+                        oak_fence(true, true, false, false),
+                        8 + i,
+                        6,
+                        11 - i,
+                        &box_limit,
+                    );
+                }
+            }
 
-            // inner.fill_with_outline(chunk, &box_limit, false, 3, 6, 3, 3, 6, 11, &f_ns, &f_ns);
-            // inner.fill_with_outline(chunk, &box_limit, false, 10, 6, 3, 10, 6, 9, &f_ns, &f_ns);
-            // inner.fill_with_outline(chunk, &box_limit, false, 4, 6, 2, 9, 6, 2, &f_ew, &f_ew);
-            // inner.fill_with_outline(chunk, &box_limit, false, 4, 6, 12, 7, 6, 12, &f_ew, &f_ew);
-
-            // // Complex fence junctions (matching the m-loop and specific offsets)
-            // inner.add_block(chunk, &Block::OAK_FENCE.default_state.with("north", "true").with("east", "true"), 3, 6, 2, &box_limit);
-            // inner.add_block(chunk, &Block::OAK_FENCE.default_state.with("south", "true").with("east", "true"), 3, 6, 12, &box_limit);
-            // inner.add_block(chunk, &Block::OAK_FENCE.default_state.with("north", "true").with("west", "true"), 10, 6, 2, &box_limit);
-            // for m in 0..=2 {
-            //     inner.add_block(chunk, &Block::OAK_FENCE.default_state.with("south", "true").with("west", "true"), 8 + m, 6, 12 - m, &box_limit);
-            //     if m != 2 {
-            //         inner.add_block(chunk, &Block::OAK_FENCE.default_state.with("north", "true").with("east", "true"), 8 + m, 6, 11 - m, &box_limit);
-            //     }
-            // }
-
-            // // Ladder
             let mut props = LadderLikeProperties::default(&Block::LADDER);
             props.facing = HorizontalFacing::South;
             let ladder = BlockState::from_id(props.to_state_id(&Block::LADDER));
@@ -214,24 +261,57 @@ impl StructurePieceBase for LibraryPiece {
                 inner.add_block(chunk, ladder, 10, y, 13, &box_limit);
             }
 
-            // // Chandelier (The central structure)
-            // let f_e = Block::OAK_FENCE.default_state.with("east", "true");
-            // let f_w = Block::OAK_FENCE.default_state.with("west", "true");
-            // inner.add_block(chunk, &f_e, 6, 9, 7, &box_limit);
-            // inner.add_block(chunk, &f_w, 7, 9, 7, &box_limit);
-            // inner.add_block(chunk, &f_e, 6, 8, 7, &box_limit);
-            // inner.add_block(chunk, &f_w, 7, 8, 7, &box_limit);
+            let e_fence = oak_fence(false, true, false, false);
+            let w_fence = oak_fence(false, false, false, true);
+            inner.add_block(chunk, e_fence, 6, 9, 7, &box_limit);
+            inner.add_block(chunk, w_fence, 7, 9, 7, &box_limit);
+            inner.add_block(chunk, e_fence, 6, 8, 7, &box_limit);
+            inner.add_block(chunk, w_fence, 7, 8, 7, &box_limit);
+            let nswe_fence = oak_fence(true, true, true, true);
+            inner.add_block(chunk, nswe_fence, 6, 7, 7, &box_limit);
+            inner.add_block(chunk, nswe_fence, 7, 7, 7, &box_limit);
+            inner.add_block(chunk, e_fence, 5, 7, 7, &box_limit);
+            inner.add_block(chunk, w_fence, 8, 7, 7, &box_limit);
+            inner.add_block(
+                chunk,
+                oak_fence(true, true, false, false),
+                6,
+                7,
+                6,
+                &box_limit,
+            );
+            inner.add_block(
+                chunk,
+                oak_fence(false, true, true, false),
+                6,
+                7,
+                8,
+                &box_limit,
+            );
+            inner.add_block(
+                chunk,
+                oak_fence(true, false, false, true),
+                7,
+                7,
+                6,
+                &box_limit,
+            );
+            inner.add_block(
+                chunk,
+                oak_fence(false, false, true, true),
+                7,
+                7,
+                8,
+                &box_limit,
+            );
 
-            // let f_full = f_ns.with("west", "true").with("east", "true");
-            // inner.add_block(chunk, &f_full, 6, 7, 7, &box_limit);
-            // inner.add_block(chunk, &f_full, 7, 7, 7, &box_limit);
-
-            // Chandelier Torches
             let t = Block::TORCH.default_state;
             inner.add_block(chunk, t, 5, 8, 7, &box_limit);
             inner.add_block(chunk, t, 8, 8, 7, &box_limit);
             inner.add_block(chunk, t, 6, 8, 6, &box_limit);
             inner.add_block(chunk, t, 6, 8, 8, &box_limit);
+            inner.add_block(chunk, t, 7, 8, 6, &box_limit);
+            inner.add_block(chunk, t, 7, 8, 8, &box_limit);
         }
 
         // 6. Chests
@@ -245,7 +325,7 @@ impl StructurePieceBase for LibraryPiece {
             "minecraft:chests/stronghold_library",
         );
         if self.tall {
-            inner.add_block(chunk, Block::AIR.default_state, 12, 9, 1, &box_limit); // Clear space above top chest
+            inner.add_block(chunk, Block::CAVE_AIR.default_state, 12, 9, 1, &box_limit); // Clear space above top chest
             inner.add_chest(
                 chunk,
                 &box_limit,

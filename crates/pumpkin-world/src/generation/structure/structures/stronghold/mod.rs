@@ -4,7 +4,7 @@ use pumpkin_data::{
     Block, BlockState,
     block_properties::{
         DoubleBlockHalf, HorizontalFacing, LeverLikeProperties, OakDoorLikeProperties,
-        OakFenceLikeProperties,
+        OakFenceLikeProperties, WallTorchLikeProperties,
     },
 };
 use pumpkin_util::{
@@ -83,40 +83,39 @@ impl StructureGenerator for StrongholdGenerator {
             let start_piece = SpiralStaircasePiece::new_start(&mut random, start_x, start_z);
 
             let base_piece = start_piece.piece.piece.clone();
-
-            // In Vanilla, pieces_to_process is 'start.pieces'
-            let mut pieces_to_process: Vec<Box<dyn StructurePieceBase>> = Vec::new();
-
-            // Initial Fill
-            start_piece.fill_openings(
-                &base_piece,
-                &mut random,
-                &mut weights,
-                &mut last_piece_type,
-                &mut has_portal_room,
-                &mut collector,
-                &mut pieces_to_process,
-            );
-
             collector.add_piece(Box::new(start_piece));
 
-            // Growth Loop
+            let mut pieces_to_process: Vec<usize> = Vec::new();
+            let mut fill_openings =
+                |piece_idx: usize,
+                 random: &mut RandomGenerator,
+                 collector: &mut StructurePiecesCollector,
+                 pieces_to_process: &mut Vec<usize>| {
+                    let placeholder =
+                        Box::new(collector.pieces[piece_idx].get_structure_piece().clone());
+                    let piece = std::mem::replace(&mut collector.pieces[piece_idx], placeholder);
+                    piece.fill_openings(
+                        &base_piece,
+                        random,
+                        &mut weights,
+                        &mut last_piece_type,
+                        &mut has_portal_room,
+                        collector,
+                        pieces_to_process,
+                    );
+                    collector.pieces[piece_idx] = piece;
+                };
+
+            fill_openings(0, &mut random, &mut collector, &mut pieces_to_process);
             while !pieces_to_process.is_empty() {
                 let idx = random.next_bounded_i32(pieces_to_process.len() as i32) as usize;
-                let piece = pieces_to_process.remove(idx);
-
-                piece.fill_openings(
-                    &base_piece,
+                let piece_idx = pieces_to_process.remove(idx);
+                fill_openings(
+                    piece_idx,
                     &mut random,
-                    &mut weights,
-                    &mut last_piece_type,
-                    &mut has_portal_room,
                     &mut collector,
                     &mut pieces_to_process,
                 );
-
-                // Move into collector AFTER processing its children
-                collector.add_piece(piece);
             }
 
             // Shift height
@@ -157,12 +156,18 @@ impl EntranceType {
     }
 }
 
+fn wall_torch(facing: HorizontalFacing) -> &'static BlockState {
+    let mut props = WallTorchLikeProperties::default(&Block::WALL_TORCH);
+    props.facing = facing;
+    BlockState::from_id(props.to_state_id(&Block::WALL_TORCH))
+}
+
 struct StoneBrickRandomizer;
 
 impl BlockRandomizer for StoneBrickRandomizer {
     fn get_block(&self, rng: &mut RandomGenerator, is_border: bool) -> &BlockState {
         if !is_border {
-            return Block::AIR.default_state;
+            return Block::CAVE_AIR.default_state;
         }
 
         let roll = rng.next_f32();
@@ -170,6 +175,8 @@ impl BlockRandomizer for StoneBrickRandomizer {
             Block::CRACKED_STONE_BRICKS.default_state
         } else if roll < 0.5 {
             Block::MOSSY_STONE_BRICKS.default_state
+        } else if roll < 0.55 {
+            Block::INFESTED_STONE_BRICKS.default_state
         } else {
             Block::STONE_BRICKS.default_state
         }
@@ -285,7 +292,7 @@ impl StrongholdPiece {
     ) {
         match entrance_type {
             EntranceType::Opening => {
-                let air = Block::AIR.default_state;
+                let air = Block::CAVE_AIR.default_state;
                 self.piece.fill_with_outline(
                     chunk,
                     box_limit,
@@ -424,7 +431,7 @@ impl StrongholdPiece {
         last_piece_type: &mut Option<StrongholdPieceType>,
         left_right_offset: i32,
         height_offset: i32,
-        pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        pieces_to_process: &mut Vec<usize>,
         piece: Option<StrongholdPieceType>,
     ) {
         if let Some(facing) = self.piece.facing {
@@ -453,7 +460,7 @@ impl StrongholdPiece {
                 _ => return,
             };
 
-            if let Some(next) = Self::piece_generator(
+            Self::piece_generator(
                 start,
                 collector,
                 random,
@@ -465,9 +472,8 @@ impl StrongholdPiece {
                 facing,
                 self.piece.chain_length,
                 piece,
-            ) {
-                pieces_to_process.push(next);
-            }
+                pieces_to_process,
+            );
         }
     }
 
@@ -481,7 +487,7 @@ impl StrongholdPiece {
         last_piece_type: &mut Option<StrongholdPieceType>,
         height_offset: i32,
         left_right_offset: i32,
-        pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        pieces_to_process: &mut Vec<usize>,
     ) {
         if let Some(facing) = &self.piece.facing {
             let bounding_box = self.piece.bounding_box;
@@ -503,7 +509,7 @@ impl StrongholdPiece {
                 _ => return,
             };
 
-            if let Some(next) = Self::piece_generator(
+            Self::piece_generator(
                 start,
                 collector,
                 random,
@@ -515,9 +521,8 @@ impl StrongholdPiece {
                 next_facing,
                 self.piece.chain_length,
                 None,
-            ) {
-                pieces_to_process.push(next);
-            }
+                pieces_to_process,
+            );
         }
     }
 
@@ -531,7 +536,7 @@ impl StrongholdPiece {
         last_piece_type: &mut Option<StrongholdPieceType>,
         height_offset: i32,
         left_right_offset: i32,
-        pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        pieces_to_process: &mut Vec<usize>,
     ) {
         if let Some(facing) = &self.piece.facing {
             let bounding_box = self.piece.bounding_box;
@@ -552,7 +557,7 @@ impl StrongholdPiece {
                 _ => return,
             };
 
-            if let Some(next) = Self::piece_generator(
+            Self::piece_generator(
                 start,
                 collector,
                 random,
@@ -564,9 +569,8 @@ impl StrongholdPiece {
                 next_facing,
                 self.piece.chain_length,
                 None,
-            ) {
-                pieces_to_process.push(next);
-            }
+                pieces_to_process,
+            );
         }
     }
 
@@ -582,49 +586,35 @@ impl StrongholdPiece {
         z: i32,
         orientation: BlockDirection,
         chain_length: u32,
-        piece_type: Option<StrongholdPieceType>,
-    ) -> Option<Box<dyn StructurePieceBase>> {
+        imposed_piece: Option<StrongholdPieceType>,
+        pieces_to_process: &mut Vec<usize>,
+    ) {
         // Vanilla limit is 50
         if chain_length > 50 {
-            return None;
+            return;
         }
 
         // Distance check from start (112 blocks)
         let start_box = start.bounding_box;
         if (x - start_box.min.x).abs() > 112 || (z - start_box.min.z).abs() > 112 {
-            return None;
+            return;
         }
 
-        let next_piece = if let Some(p_type) = piece_type {
-            Self::create_piece(
-                p_type,
-                collector,
-                random,
-                x,
-                y,
-                z,
-                orientation,
-                chain_length + 1,
-            )
-        } else {
-            Self::pick_piece(
-                collector,
-                random,
-                weights,
-                last_piece_type,
-                x,
-                y,
-                z,
-                orientation,
-                chain_length + 1,
-            )
-        };
-
-        if let Some(p) = next_piece {
-            return Some(p);
+        if let Some(next) = Self::pick_piece(
+            collector,
+            random,
+            weights,
+            last_piece_type,
+            x,
+            y,
+            z,
+            orientation,
+            chain_length + 1,
+            imposed_piece,
+        ) {
+            pieces_to_process.push(collector.pieces.len());
+            collector.add_piece(next);
         }
-
-        None
     }
 
     fn check_remaining_pieces(weights: &Vec<PieceWeight>, total_weight: &mut i32) -> bool {
@@ -653,11 +643,27 @@ impl StrongholdPiece {
         z: i32,
         orientation: BlockDirection,
         chain_length: u32,
+        imposed_piece: Option<StrongholdPieceType>,
     ) -> Option<Box<dyn StructurePieceBase>> {
         let mut total_weight = 0;
 
         if !Self::check_remaining_pieces(weights, &mut total_weight) {
             return None;
+        }
+
+        if let Some(piece_type) = imposed_piece
+            && let Some(p) = Self::create_piece(
+                piece_type,
+                collector,
+                random,
+                x,
+                y,
+                z,
+                orientation,
+                chain_length,
+            )
+        {
+            return Some(p);
         }
 
         let mut attempt = 0;
