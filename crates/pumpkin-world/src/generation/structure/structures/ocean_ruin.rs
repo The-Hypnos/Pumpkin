@@ -1,25 +1,34 @@
 use std::sync::Arc;
 
 use pumpkin_data::{
-    Block, BlockState, Mirror, Rotation,
+    Block, BlockState, BlockStateId, Mirror, Rotation,
     block_properties::{ChestLikeProperties, HorizontalFacing},
+    tag,
 };
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::{
     HeightMap,
     math::{block_box::BlockBox, position::BlockPos, vector3::Vector3},
-    random::{RandomGenerator, RandomImpl, hash_block_pos, legacy_rand::LegacyRand},
+    random::{
+        RandomDeriverImpl, RandomGenerator, RandomImpl, hash_block_pos, legacy_rand::LegacyRand,
+    },
 };
 
 use crate::{
     ProtoChunk,
-    generation::structure::{
-        piece::StructurePieceType,
-        structures::{
-            StructureGenerator, StructureGeneratorContext, StructurePiece, StructurePieceBase,
-            StructurePiecesCollector, StructurePosition, WorldPortalExt,
+    generation::{
+        proto_chunk::GenerationCache,
+        structure::{
+            piece::StructurePieceType,
+            structures::{
+                StructureGenerator, StructureGeneratorContext, StructurePiece, StructurePieceBase,
+                StructurePiecesCollector, StructurePosition, WorldPortalExt,
+            },
+            template::{
+                BlockStateResolver, StructurePlaceSettings, StructureTemplate, get_template,
+                holds_water,
+            },
         },
-        template::{BlockStateResolver, StructurePlaceSettings, StructureTemplate, get_template},
     },
 };
 
@@ -192,7 +201,7 @@ fn add_cluster_ruins(
             break;
         }
         let idx = random.next_bounded_i32(all_positions.len() as i32) as usize;
-        let pos = all_positions.swap_remove(idx);
+        let pos = all_positions.remove(idx);
         let next_rotation = Rotation::from_index(random.next_bounded_i32(4) as u8);
         let next_corner = StructureTemplate::transform_block_pos(
             Vector3::new(5, 0, 6),
@@ -377,7 +386,66 @@ impl OceanRuinPiece {
         }
     }
 
-    fn calculate_height(pos: Vector3<i32>, corner: Vector3<i32>, chunk: &ProtoChunk) -> i32 {
+    fn suspicious_block_indices(&self, seed: i64) -> Vec<usize> {
+        const SUSPICIOUS_BLOCK_LIMIT: usize = 5;
+        let candidate = if self.is_warm {
+            "minecraft:sand"
+        } else {
+            "minecraft:gravel"
+        };
+        let processed: Vec<(usize, bool)> = self
+            .template
+            .blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(index, block)| {
+                let name = self.template.palette[block.state as usize].name.as_str();
+                let world_pos = self.template_position
+                    + StructureTemplate::transform_block_pos(
+                        block.pos,
+                        Mirror::None,
+                        self.rotation,
+                        Vector3::new(0, 0, 0),
+                    );
+                let kept =
+                    LegacyRand::from_seed(
+                        hash_block_pos(world_pos.x, world_pos.y, world_pos.z) as u64
+                    )
+                    .next_f32()
+                        <= self.integrity;
+                let ignored = matches!(
+                    name,
+                    "minecraft:air" | "minecraft:structure_block" | "minecraft:structure_void"
+                );
+                (kept && !ignored).then_some((index, name == candidate))
+            })
+            .collect();
+        if processed.is_empty() {
+            return Vec::new();
+        }
+
+        let pos = self.template_position;
+        let mut random = RandomGenerator::Legacy(LegacyRand::from_seed(seed as u64))
+            .next_splitter()
+            .split_pos(pos.x, pos.y, pos.z);
+        let mut order: Vec<usize> = (0..processed.len()).collect();
+        for i in (2..=order.len()).rev() {
+            let swap_to = random.next_bounded_i32(i as i32) as usize;
+            order.swap(i - 1, swap_to);
+        }
+        order
+            .into_iter()
+            .filter(|&i| processed[i].1)
+            .take(SUSPICIOUS_BLOCK_LIMIT)
+            .map(|i| processed[i].0)
+            .collect()
+    }
+
+    fn calculate_height(
+        pos: Vector3<i32>,
+        corner: Vector3<i32>,
+        region: &dyn GenerationCache,
+    ) -> i32 {
         let mut new_y = pos.y;
         let mut min_y = 512;
         let top_y = new_y - 1;
@@ -386,10 +454,19 @@ impl OceanRuinPiece {
         let max_x = pos.x.max(corner.x);
         let min_z = pos.z.min(corner.z);
         let max_z = pos.z.max(corner.z);
+        let level_min_y = i32::from(region.get_center_chunk().bottom_y());
 
         for x in min_x..=max_x {
             for z in min_z..=max_z {
-                let floor_y = chunk.get_top_y(&HeightMap::OceanFloorWg, x, z) - 1;
+                let mut floor_y = pos.y - 1;
+                while floor_y > level_min_y + 1
+                    && is_sunken(GenerationCache::get_block_state(
+                        region,
+                        &Vector3::new(x, floor_y, z),
+                    ))
+                {
+                    floor_y -= 1;
+                }
                 min_y = min_y.min(floor_y);
                 if floor_y < top_y - 2 {
                     area += 1;
@@ -424,16 +501,15 @@ impl StructurePieceBase for OceanRuinPiece {
         self.template_position += Vector3::new(x, y, z);
     }
 
-    #[allow(clippy::too_many_lines)]
-    fn place(
+    fn place_in_region(
         &mut self,
-        chunk: &mut ProtoChunk,
-        _block_registry: &dyn WorldPortalExt,
+        region: &mut dyn GenerationCache,
+        block_registry: &dyn WorldPortalExt,
         random: &mut RandomGenerator,
-        _seed: i64,
+        seed: i64,
         chunk_box: &BlockBox,
     ) {
-        let height = chunk.get_top_y(
+        let height = region.get_top_y(
             &HeightMap::OceanFloorWg,
             self.template_position.x,
             self.template_position.z,
@@ -446,9 +522,26 @@ impl StructurePieceBase for OceanRuinPiece {
             self.rotation,
             Vector3::new(0, 0, 0),
         ) + pos;
-
-        pos.y = Self::calculate_height(pos, corner, chunk);
+        pos.y = Self::calculate_height(pos, corner, region);
         self.template_position = pos;
+        self.place(
+            region.get_center_chunk_mut(),
+            block_registry,
+            random,
+            seed,
+            chunk_box,
+        );
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn place(
+        &mut self,
+        chunk: &mut ProtoChunk,
+        _block_registry: &dyn WorldPortalExt,
+        _random: &mut RandomGenerator,
+        seed: i64,
+        chunk_box: &BlockBox,
+    ) {
         let place_settings = StructurePlaceSettings::new()
             .set_rotation(self.rotation)
             .set_mirror(Mirror::None);
@@ -457,9 +550,9 @@ impl StructurePieceBase for OceanRuinPiece {
             .get_bounding_box(&place_settings, self.template_position);
         let box_limit = self.piece.bounding_box;
 
-        let mut suspicious_count = 0;
+        let suspicious = self.suspicious_block_indices(seed);
 
-        for block in &self.template.blocks {
+        for (index, block) in self.template.blocks.iter().enumerate() {
             let palette_entry = &self.template.palette[block.state as usize];
 
             if palette_entry.name == "minecraft:structure_void"
@@ -486,8 +579,7 @@ impl StructurePieceBase for OceanRuinPiece {
                     if mode == "DATA" {
                         let metadata = nbt.get_string("metadata").unwrap_or("");
                         if metadata == "chest" {
-                            let is_water =
-                                chunk.get_block_state(&world_pos).to_block_id() == Block::WATER.id;
+                            let is_water = holds_water(chunk.get_block_state(&world_pos));
                             let mut props = ChestLikeProperties::default(&Block::CHEST);
                             props.facing = HorizontalFacing::North;
                             props.waterlogged = is_water;
@@ -536,7 +628,9 @@ impl StructurePieceBase for OceanRuinPiece {
                 continue;
             }
 
-            if self.integrity < 0.999 && random.next_f32() > self.integrity {
+            let mut rot_random =
+                LegacyRand::from_seed(hash_block_pos(world_pos.x, world_pos.y, world_pos.z) as u64);
+            if rot_random.next_f32() > self.integrity {
                 continue;
             }
 
@@ -544,12 +638,8 @@ impl StructurePieceBase for OceanRuinPiece {
                 continue;
             }
 
-            if self.is_warm
-                && palette_entry.name == "minecraft:sand"
-                && suspicious_count < 5
-                && random.next_f32() < 0.45
+            if self.is_warm && palette_entry.name == "minecraft:sand" && suspicious.contains(&index)
             {
-                suspicious_count += 1;
                 chunk.set_block_state(
                     world_pos.x,
                     world_pos.y,
@@ -575,10 +665,8 @@ impl StructurePieceBase for OceanRuinPiece {
                 continue;
             } else if !self.is_warm
                 && palette_entry.name == "minecraft:gravel"
-                && suspicious_count < 5
-                && random.next_f32() < 0.45
+                && suspicious.contains(&index)
             {
-                suspicious_count += 1;
                 chunk.set_block_state(
                     world_pos.x,
                     world_pos.y,
@@ -666,4 +754,8 @@ impl StructurePieceBase for OceanRuinPiece {
             }
         }
     }
+}
+
+fn is_sunken(id: BlockStateId) -> bool {
+    id.to_state().is_air() || holds_water(id) || id.to_block_id().has_tag(tag::Block::MINECRAFT_ICE)
 }
