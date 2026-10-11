@@ -190,6 +190,40 @@ impl BlockState {
             .map(|&id| COLLISION_SHAPES[id as usize])
     }
 
+    #[must_use]
+    pub fn is_collision_face_full(&self, side: BlockDirection) -> bool {
+        let shapes: Vec<_> = self.get_block_collision_shapes().collect();
+        let covers = |min: f64, max: f64, at: f64| min <= at && at <= max;
+        (0..16).all(|a| {
+            (0..16).all(|b| {
+                let (u, v) = ((f64::from(a) + 0.5) / 16.0, (f64::from(b) + 0.5) / 16.0);
+                shapes.iter().any(|shape| {
+                    let (min, max) = (shape.min, shape.max);
+                    match side {
+                        BlockDirection::Down => {
+                            min.y <= 0.0 && covers(min.x, max.x, u) && covers(min.z, max.z, v)
+                        }
+                        BlockDirection::Up => {
+                            max.y >= 1.0 && covers(min.x, max.x, u) && covers(min.z, max.z, v)
+                        }
+                        BlockDirection::North => {
+                            min.z <= 0.0 && covers(min.x, max.x, u) && covers(min.y, max.y, v)
+                        }
+                        BlockDirection::South => {
+                            max.z >= 1.0 && covers(min.x, max.x, u) && covers(min.y, max.y, v)
+                        }
+                        BlockDirection::West => {
+                            min.x <= 0.0 && covers(min.y, max.y, u) && covers(min.z, max.z, v)
+                        }
+                        BlockDirection::East => {
+                            max.x >= 1.0 && covers(min.y, max.y, u) && covers(min.z, max.z, v)
+                        }
+                    }
+                })
+            })
+        })
+    }
+
     /// Returns block-local collision shapes with vanilla's coordinate-derived offset applied.
     pub fn get_block_collision_shapes_at(
         &self,

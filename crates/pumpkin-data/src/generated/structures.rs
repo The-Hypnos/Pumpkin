@@ -521,7 +521,28 @@ pub struct Structure {
     pub biome_temp: Option<&'static str>,
     pub cluster_probability: Option<f32>,
     pub large_probability: Option<f32>,
+    pub ruined_portal_setups: &'static [RuinedPortalSetup],
     pub structure_type: StructureType,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuinedPortalVerticalPlacement {
+    OnLandSurface,
+    PartlyBuried,
+    OnOceanFloor,
+    InMountain,
+    Underground,
+    InNether,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RuinedPortalSetup {
+    pub placement: RuinedPortalVerticalPlacement,
+    pub air_pocket_probability: f32,
+    pub mossiness: f32,
+    pub overgrown: bool,
+    pub vines: bool,
+    pub can_be_cold: bool,
+    pub replace_with_blackstone: bool,
+    pub weight: f32,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GenerationStep {
@@ -576,6 +597,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_BIRCH_FOREST: Self = Structure {
@@ -601,6 +623,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_CHERRY_GROVE: Self = Structure {
@@ -626,6 +649,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_DAPPLED_FOREST: Self = Structure {
@@ -651,6 +675,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_FLOWER_FOREST: Self = Structure {
@@ -676,6 +701,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_FOREST: Self = Structure {
@@ -701,6 +727,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_MEADOW: Self = Structure {
@@ -726,6 +753,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_OLD_GROWTH_BIRCH_FOREST: Self = Structure {
@@ -751,6 +779,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_OLD_GROWTH_PINE_TAIGA: Self = Structure {
@@ -776,6 +805,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_OLD_GROWTH_SPRUCE_TAIGA: Self = Structure {
@@ -801,6 +831,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_PALE_GARDEN: Self = Structure {
@@ -826,6 +857,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_SAVANNA: Self = Structure {
@@ -851,6 +883,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_SNOWY_TAIGA: Self = Structure {
@@ -876,6 +909,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_SPARSE_JUNGLE: Self = Structure {
@@ -901,6 +935,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_SWAMP: Self = Structure {
@@ -926,6 +961,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_TAIGA: Self = Structure {
@@ -951,6 +987,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_WINDSWEPT_FOREST: Self = Structure {
@@ -976,6 +1013,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ABANDONED_CAMP_WOODED_BADLANDS: Self = Structure {
@@ -1001,6 +1039,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const ANCIENT_CITY: Self = Structure {
@@ -1067,6 +1106,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const BASTION_REMNANT: Self = Structure {
@@ -1092,6 +1132,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const BURIED_TREASURE: Self = Structure {
@@ -1114,6 +1155,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::BuriedTreasure,
     };
     pub const DESERT_PYRAMID: Self = Structure {
@@ -1136,6 +1178,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::DesertPyramid,
     };
     pub const END_CITY: Self = Structure {
@@ -1158,6 +1201,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::EndCity,
     };
     pub const FORTRESS: Self = Structure {
@@ -1215,6 +1259,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Fortress,
     };
     pub const IGLOO: Self = Structure {
@@ -1237,6 +1282,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Igloo,
     };
     pub const JUNGLE_PYRAMID: Self = Structure {
@@ -1259,6 +1305,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::JungleTemple,
     };
     pub const MANSION: Self = Structure {
@@ -1281,6 +1328,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::WoodlandMansion,
     };
     pub const MINESHAFT: Self = Structure {
@@ -1303,6 +1351,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Mineshaft,
     };
     pub const MINESHAFT_MESA: Self = Structure {
@@ -1325,6 +1374,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Mineshaft,
     };
     pub const MONUMENT: Self = Structure {
@@ -1368,6 +1418,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::OceanMonument,
     };
     pub const NETHER_FOSSIL: Self = Structure {
@@ -1393,6 +1444,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::NetherFossil,
     };
     pub const OCEAN_RUIN_COLD: Self = Structure {
@@ -1415,6 +1467,7 @@ impl Structure {
         biome_temp: Some("cold"),
         cluster_probability: Some(0.9f32),
         large_probability: Some(0.3f32),
+        ruined_portal_setups: &[],
         structure_type: StructureType::OceanRuin,
     };
     pub const OCEAN_RUIN_WARM: Self = Structure {
@@ -1437,6 +1490,7 @@ impl Structure {
         biome_temp: Some("warm"),
         cluster_probability: Some(0.9f32),
         large_probability: Some(0.3f32),
+        ruined_portal_setups: &[],
         structure_type: StructureType::OceanRuin,
     };
     pub const PILLAGER_OUTPOST: Self = Structure {
@@ -1471,6 +1525,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const RUINED_PORTAL: Self = Structure {
@@ -1493,6 +1548,28 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[
+            RuinedPortalSetup {
+                placement: RuinedPortalVerticalPlacement::Underground,
+                air_pocket_probability: 1f32,
+                mossiness: 0.2f32,
+                overgrown: false,
+                vines: false,
+                can_be_cold: true,
+                replace_with_blackstone: false,
+                weight: 0.5f32,
+            },
+            RuinedPortalSetup {
+                placement: RuinedPortalVerticalPlacement::OnLandSurface,
+                air_pocket_probability: 0f32,
+                mossiness: 0.2f32,
+                overgrown: false,
+                vines: false,
+                can_be_cold: true,
+                replace_with_blackstone: false,
+                weight: 0.5f32,
+            },
+        ],
         structure_type: StructureType::RuinedPortal,
     };
     pub const RUINED_PORTAL_DESERT: Self = Structure {
@@ -1515,6 +1592,16 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[RuinedPortalSetup {
+            placement: RuinedPortalVerticalPlacement::PartlyBuried,
+            air_pocket_probability: 0f32,
+            mossiness: 0f32,
+            overgrown: false,
+            vines: false,
+            can_be_cold: false,
+            replace_with_blackstone: false,
+            weight: 1f32,
+        }],
         structure_type: StructureType::RuinedPortal,
     };
     pub const RUINED_PORTAL_JUNGLE: Self = Structure {
@@ -1537,6 +1624,16 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[RuinedPortalSetup {
+            placement: RuinedPortalVerticalPlacement::OnLandSurface,
+            air_pocket_probability: 0f32,
+            mossiness: 0.8f32,
+            overgrown: true,
+            vines: true,
+            can_be_cold: false,
+            replace_with_blackstone: false,
+            weight: 1f32,
+        }],
         structure_type: StructureType::RuinedPortal,
     };
     pub const RUINED_PORTAL_MOUNTAIN: Self = Structure {
@@ -1559,6 +1656,28 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[
+            RuinedPortalSetup {
+                placement: RuinedPortalVerticalPlacement::InMountain,
+                air_pocket_probability: 1f32,
+                mossiness: 0.2f32,
+                overgrown: false,
+                vines: false,
+                can_be_cold: true,
+                replace_with_blackstone: false,
+                weight: 0.5f32,
+            },
+            RuinedPortalSetup {
+                placement: RuinedPortalVerticalPlacement::OnLandSurface,
+                air_pocket_probability: 0f32,
+                mossiness: 0.2f32,
+                overgrown: false,
+                vines: false,
+                can_be_cold: true,
+                replace_with_blackstone: false,
+                weight: 0.5f32,
+            },
+        ],
         structure_type: StructureType::RuinedPortal,
     };
     pub const RUINED_PORTAL_NETHER: Self = Structure {
@@ -1581,6 +1700,16 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[RuinedPortalSetup {
+            placement: RuinedPortalVerticalPlacement::InNether,
+            air_pocket_probability: 0f32,
+            mossiness: 0f32,
+            overgrown: false,
+            vines: false,
+            can_be_cold: false,
+            replace_with_blackstone: true,
+            weight: 1f32,
+        }],
         structure_type: StructureType::RuinedPortal,
     };
     pub const RUINED_PORTAL_OCEAN: Self = Structure {
@@ -1603,6 +1732,16 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[RuinedPortalSetup {
+            placement: RuinedPortalVerticalPlacement::OnOceanFloor,
+            air_pocket_probability: 0f32,
+            mossiness: 0.8f32,
+            overgrown: false,
+            vines: false,
+            can_be_cold: true,
+            replace_with_blackstone: false,
+            weight: 1f32,
+        }],
         structure_type: StructureType::RuinedPortal,
     };
     pub const RUINED_PORTAL_SWAMP: Self = Structure {
@@ -1625,6 +1764,16 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[RuinedPortalSetup {
+            placement: RuinedPortalVerticalPlacement::OnOceanFloor,
+            air_pocket_probability: 0f32,
+            mossiness: 0.5f32,
+            overgrown: false,
+            vines: true,
+            can_be_cold: false,
+            replace_with_blackstone: false,
+            weight: 1f32,
+        }],
         structure_type: StructureType::RuinedPortal,
     };
     pub const SHIPWRECK: Self = Structure {
@@ -1647,6 +1796,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Shipwreck,
     };
     pub const SHIPWRECK_BEACHED: Self = Structure {
@@ -1669,6 +1819,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Shipwreck,
     };
     pub const STRONGHOLD: Self = Structure {
@@ -1691,6 +1842,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Stronghold,
     };
     pub const SWAMP_HUT: Self = Structure {
@@ -1734,6 +1886,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::SwampHut,
     };
     pub const TRAIL_RUINS: Self = Structure {
@@ -1759,6 +1912,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const TRIAL_CHAMBERS: Self = Structure {
@@ -1907,6 +2061,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const VILLAGE_DESERT: Self = Structure {
@@ -1932,6 +2087,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const VILLAGE_PLAINS: Self = Structure {
@@ -1957,6 +2113,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const VILLAGE_SAVANNA: Self = Structure {
@@ -1982,6 +2139,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const VILLAGE_SNOWY: Self = Structure {
@@ -2007,6 +2165,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     pub const VILLAGE_TAIGA: Self = Structure {
@@ -2032,6 +2191,7 @@ impl Structure {
         biome_temp: None,
         cluster_probability: None,
         large_probability: None,
+        ruined_portal_setups: &[],
         structure_type: StructureType::Jigsaw,
     };
     #[must_use]

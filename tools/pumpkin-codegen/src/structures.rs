@@ -123,6 +123,18 @@ fn default_spawn_count() -> u32 {
     1
 }
 
+#[derive(Deserialize, Clone)]
+pub struct RuinedPortalSetupStruct {
+    pub placement: String,
+    pub air_pocket_probability: f32,
+    pub mossiness: f32,
+    pub overgrown: bool,
+    pub vines: bool,
+    pub can_be_cold: bool,
+    pub replace_with_blackstone: bool,
+    pub weight: f32,
+}
+
 /// Deserialized structure entry specifying its valid biomes and generation step.
 #[derive(Deserialize, Clone)]
 pub struct StructureStruct {
@@ -168,6 +180,8 @@ pub struct StructureStruct {
     pub cluster_probability: Option<f32>,
     /// Optional large probability for ocean ruins.
     pub large_probability: Option<f32>,
+    #[serde(default)]
+    pub setups: Vec<RuinedPortalSetupStruct>,
     /// Defines the generation behavior (e.g. "minecraft:jigsaw").
     #[serde(rename = "type")]
     pub structure_type: String,
@@ -460,6 +474,31 @@ impl ToTokens for StructureStruct {
             quote!(None)
         };
 
+        let ruined_portal_setups: Vec<TokenStream> = self
+            .setups
+            .iter()
+            .map(|setup| {
+                let placement = ruined_portal_placement_to_token(&setup.placement);
+                let air_pocket_probability = setup.air_pocket_probability;
+                let mossiness = setup.mossiness;
+                let overgrown = setup.overgrown;
+                let vines = setup.vines;
+                let can_be_cold = setup.can_be_cold;
+                let replace_with_blackstone = setup.replace_with_blackstone;
+                let weight = setup.weight;
+                quote!(RuinedPortalSetup {
+                    placement: #placement,
+                    air_pocket_probability: #air_pocket_probability,
+                    mossiness: #mossiness,
+                    overgrown: #overgrown,
+                    vines: #vines,
+                    can_be_cold: #can_be_cold,
+                    replace_with_blackstone: #replace_with_blackstone,
+                    weight: #weight,
+                })
+            })
+            .collect();
+
         let structure_type = structure_type_to_token(&self.structure_type);
 
         tokens.extend(quote!(
@@ -483,6 +522,7 @@ impl ToTokens for StructureStruct {
                 biome_temp: #biome_temp,
                 cluster_probability: #cluster_probability,
                 large_probability: #large_probability,
+                ruined_portal_setups: &[#(#ruined_portal_setups),*],
                 structure_type: #structure_type,
             }
         ));
@@ -593,6 +633,18 @@ fn structure_type_to_token(st: &str) -> TokenStream {
         "minecraft:stronghold" => quote!(StructureType::Stronghold),
         "minecraft:swamp_hut" => quote!(StructureType::SwampHut),
         _ => quote!(StructureType::Unknown),
+    }
+}
+
+fn ruined_portal_placement_to_token(placement: &str) -> TokenStream {
+    match placement {
+        "on_land_surface" => quote!(RuinedPortalVerticalPlacement::OnLandSurface),
+        "partly_buried" => quote!(RuinedPortalVerticalPlacement::PartlyBuried),
+        "on_ocean_floor" => quote!(RuinedPortalVerticalPlacement::OnOceanFloor),
+        "in_mountain" => quote!(RuinedPortalVerticalPlacement::InMountain),
+        "underground" => quote!(RuinedPortalVerticalPlacement::Underground),
+        "in_nether" => quote!(RuinedPortalVerticalPlacement::InNether),
+        _ => panic!("unknown ruined portal placement {placement}"),
     }
 }
 
@@ -1166,7 +1218,30 @@ pub fn build() -> TokenStream {
             pub biome_temp: Option<&'static str>,
             pub cluster_probability: Option<f32>,
             pub large_probability: Option<f32>,
+            pub ruined_portal_setups: &'static [RuinedPortalSetup],
             pub structure_type: StructureType,
+        }
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum RuinedPortalVerticalPlacement {
+            OnLandSurface,
+            PartlyBuried,
+            OnOceanFloor,
+            InMountain,
+            Underground,
+            InNether,
+        }
+
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        pub struct RuinedPortalSetup {
+            pub placement: RuinedPortalVerticalPlacement,
+            pub air_pocket_probability: f32,
+            pub mossiness: f32,
+            pub overgrown: bool,
+            pub vines: bool,
+            pub can_be_cold: bool,
+            pub replace_with_blackstone: bool,
+            pub weight: f32,
         }
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
