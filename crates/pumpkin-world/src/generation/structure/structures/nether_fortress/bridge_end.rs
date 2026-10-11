@@ -72,8 +72,9 @@ impl StructurePieceBase for BridgeEndPiece {
         _random: &mut RandomGenerator,
         _bridge_pieces: &mut Vec<PieceWeight>,
         _corridor_pieces: &mut Vec<PieceWeight>,
+        _last_piece: &mut Option<super::NetherFortressPieceType>,
         _collector: &mut StructurePiecesCollector,
-        _pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        _pieces_to_process: &mut Vec<usize>,
     ) {
     }
 

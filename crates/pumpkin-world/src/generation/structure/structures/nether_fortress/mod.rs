@@ -30,6 +30,8 @@ pub mod corridor_right_turn;
 pub mod corridor_stairs;
 pub mod small_corridor;
 
+const MAX_DEPTH: u32 = 30;
+
 /// Great reference: <https://minecraft.wiki/w/Nether_fortress>
 #[derive(Deserialize)]
 pub struct NetherFortressGenerator;
@@ -49,38 +51,40 @@ impl StructureGenerator for NetherFortressGenerator {
 
         let base_piece = start_piece.piece.piece.clone();
 
-        let mut pieces_to_process: Vec<
-            Box<dyn crate::generation::structure::structures::StructurePieceBase>,
-        > = Vec::new();
+        let mut pieces_to_process: Vec<usize> = Vec::new();
 
         let mut bridge_pieces = get_bridge_piece_weights();
         let mut corridor_pieces = get_corridor_piece_weights();
+        let mut last_piece: Option<NetherFortressPieceType> = None;
 
+        collector.add_piece(Box::new(base_piece.clone()));
         start_piece.fill_openings(
             &base_piece,
             &mut random,
             &mut bridge_pieces,
             &mut corridor_pieces,
+            &mut last_piece,
             &mut collector,
             &mut pieces_to_process,
         );
-
-        collector.add_piece(Box::new(start_piece));
+        collector.pieces[0] = Box::new(start_piece);
 
         while !pieces_to_process.is_empty() {
             let idx = random.next_bounded_i32(pieces_to_process.len() as i32) as usize;
-            let piece = pieces_to_process.remove(idx);
+            let piece_idx = pieces_to_process.remove(idx);
 
+            let placeholder = Box::new(collector.pieces[piece_idx].get_structure_piece().clone());
+            let piece = std::mem::replace(&mut collector.pieces[piece_idx], placeholder);
             piece.fill_openings_nether(
                 &base_piece,
                 &mut random,
                 &mut bridge_pieces,
                 &mut corridor_pieces,
+                &mut last_piece,
                 &mut collector,
                 &mut pieces_to_process,
             );
-
-            collector.add_piece(piece);
+            collector.pieces[piece_idx] = piece;
         }
 
         collector.move_inside_heights(&mut random, 48, 70);
@@ -215,7 +219,7 @@ impl NetherFortressPiece {
         chain_length: u32,
     ) -> Option<Box<dyn crate::generation::structure::structures::StructurePieceBase>> {
         let total_weight = Self::check_remaining_pieces(weights);
-        if total_weight < 0 {
+        if total_weight <= 0 || chain_length > MAX_DEPTH {
             return bridge_end::BridgeEndPiece::create(
                 collector,
                 random,
@@ -260,7 +264,6 @@ impl NetherFortressPiece {
 
                         return Some(p);
                     }
-                    break;
                 }
             }
         }
@@ -428,9 +431,7 @@ impl NetherFortressPiece {
         left_right_offset: i32,
         height_offset: i32,
         inside: bool,
-        pieces_to_process: &mut Vec<
-            Box<dyn crate::generation::structure::structures::StructurePieceBase>,
-        >,
+        pieces_to_process: &mut Vec<usize>,
     ) {
         if let Some(facing) = self.piece.facing {
             let bb = self.piece.bounding_box;
@@ -486,9 +487,7 @@ impl NetherFortressPiece {
         height_offset: i32,
         left_right_offset: i32,
         inside: bool,
-        pieces_to_process: &mut Vec<
-            Box<dyn crate::generation::structure::structures::StructurePieceBase>,
-        >,
+        pieces_to_process: &mut Vec<usize>,
     ) {
         if let Some(facing) = self.piece.facing {
             let bb = self.piece.bounding_box;
@@ -536,9 +535,7 @@ impl NetherFortressPiece {
         height_offset: i32,
         left_right_offset: i32,
         inside: bool,
-        pieces_to_process: &mut Vec<
-            Box<dyn crate::generation::structure::structures::StructurePieceBase>,
-        >,
+        pieces_to_process: &mut Vec<usize>,
     ) {
         if let Some(facing) = self.piece.facing {
             let bb = self.piece.bounding_box;
@@ -588,13 +585,11 @@ impl NetherFortressPiece {
         z: i32,
         orientation: BlockDirection,
         inside: bool,
-        pieces_to_process: &mut Vec<
-            Box<dyn crate::generation::structure::structures::StructurePieceBase>,
-        >,
+        pieces_to_process: &mut Vec<usize>,
     ) {
         let start_box = start.bounding_box;
         if (x - start_box.min.x).abs() > 112 || (z - start_box.min.z).abs() > 112 {
-            if let Some(p) = bridge_end::BridgeEndPiece::create(
+            let _ = bridge_end::BridgeEndPiece::create(
                 collector,
                 random,
                 x,
@@ -602,9 +597,7 @@ impl NetherFortressPiece {
                 z,
                 orientation,
                 self.piece.chain_length,
-            ) {
-                collector.add_piece(p);
-            }
+            );
             return;
         }
 
@@ -625,7 +618,8 @@ impl NetherFortressPiece {
             orientation,
             self.piece.chain_length + 1,
         ) {
-            pieces_to_process.push(p);
+            pieces_to_process.push(collector.pieces.len());
+            collector.add_piece(p);
         }
     }
 }

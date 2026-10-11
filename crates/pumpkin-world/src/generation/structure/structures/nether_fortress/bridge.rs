@@ -64,17 +64,17 @@ impl StructurePieceBase for BridgePiece {
         random: &mut RandomGenerator,
         bridge_pieces: &mut Vec<PieceWeight>,
         corridor_pieces: &mut Vec<PieceWeight>,
+        last_piece: &mut Option<NetherFortressPieceType>,
         collector: &mut StructurePiecesCollector,
-        pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        pieces_to_process: &mut Vec<usize>,
     ) {
-        let mut last_piece: Option<NetherFortressPieceType> = None;
         self.piece.fill_forward_opening(
             start,
             collector,
             random,
             bridge_pieces,
             corridor_pieces,
-            &mut last_piece,
+            last_piece,
             1,
             3,
             false,

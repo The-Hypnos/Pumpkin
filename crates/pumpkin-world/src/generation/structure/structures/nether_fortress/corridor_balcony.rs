@@ -64,11 +64,10 @@ impl StructurePieceBase for CorridorBalconyPiece {
         random: &mut RandomGenerator,
         bridge_pieces: &mut Vec<PieceWeight>,
         corridor_pieces: &mut Vec<PieceWeight>,
+        last_piece: &mut Option<NetherFortressPieceType>,
         collector: &mut StructurePiecesCollector,
-        pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        pieces_to_process: &mut Vec<usize>,
     ) {
-        let mut last: Option<NetherFortressPieceType> = None;
-
         // In Java: `i` is 1 for EAST/SOUTH facing, 5 for WEST/NORTH.
         let i = match self.piece.piece.facing {
             Some(BlockDirection::West | BlockDirection::North) => 5,
@@ -76,27 +75,26 @@ impl StructurePieceBase for CorridorBalconyPiece {
         };
 
         let nw_blocked = random.next_bounded_i32(8) > 0;
-        let se_blocked = random.next_bounded_i32(8) > 0;
-
         self.piece.fill_nw_opening(
             start,
             collector,
             random,
             bridge_pieces,
             corridor_pieces,
-            &mut last,
+            last_piece,
             0,
             i,
             nw_blocked,
             pieces_to_process,
         );
+        let se_blocked = random.next_bounded_i32(8) > 0;
         self.piece.fill_se_opening(
             start,
             collector,
             random,
             bridge_pieces,
             corridor_pieces,
-            &mut last,
+            last_piece,
             0,
             i,
             se_blocked,

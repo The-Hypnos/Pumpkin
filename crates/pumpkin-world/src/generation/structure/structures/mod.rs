@@ -100,6 +100,7 @@ pub trait StructurePieceBase: Send + Sync {
     ) {
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn fill_openings_nether(
         &self,
         _start: &StructurePiece,
@@ -110,8 +111,11 @@ pub trait StructurePieceBase: Send + Sync {
         _corridor_pieces: &mut Vec<
             crate::generation::structure::structures::nether_fortress::PieceWeight,
         >,
+        _last_piece: &mut Option<
+            crate::generation::structure::structures::nether_fortress::NetherFortressPieceType,
+        >,
         _collector: &mut StructurePiecesCollector,
-        _pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        _pieces_to_process: &mut Vec<usize>,
     ) {
     }
 }

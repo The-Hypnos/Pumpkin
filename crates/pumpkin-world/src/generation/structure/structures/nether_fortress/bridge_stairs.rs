@@ -61,10 +61,10 @@ impl StructurePieceBase for BridgeStairsPiece {
         random: &mut RandomGenerator,
         bridge_pieces: &mut Vec<PieceWeight>,
         corridor_pieces: &mut Vec<PieceWeight>,
+        last_piece: &mut Option<NetherFortressPieceType>,
         collector: &mut StructurePiecesCollector,
-        pieces_to_process: &mut Vec<Box<dyn StructurePieceBase>>,
+        pieces_to_process: &mut Vec<usize>,
     ) {
-        let mut last: Option<NetherFortressPieceType> = None;
         // SE opening connects into the corridor network (inside = true)
         self.piece.fill_se_opening(
             start,
@@ -72,7 +72,7 @@ impl StructurePieceBase for BridgeStairsPiece {
             random,
             bridge_pieces,
             corridor_pieces,
-            &mut last,
+            last_piece,
             6,
             2,
             false,
