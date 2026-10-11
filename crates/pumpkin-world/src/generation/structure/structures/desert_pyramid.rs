@@ -6,19 +6,19 @@ use pumpkin_data::{
 };
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::{
-    BlockDirection, HeightMap,
+    BlockDirection,
     math::{block_box::BlockBox, position::BlockPos},
-    random::{
-        RandomDeriverImpl, RandomGenerator, RandomImpl, hash_block_pos, legacy_rand::LegacyRand,
-    },
+    random::{RandomDeriverImpl, RandomGenerator, RandomImpl},
 };
 
 use crate::{
     ProtoChunk,
     generation::{
         positions::chunk_pos::{start_block_x, start_block_z},
+        proto_chunk::GenerationCache,
         structure::{
             piece::StructurePieceType,
+            shiftable_piece::lowest_ground_height,
             structures::{
                 StructureGenerator, StructureGeneratorContext, StructurePiece, StructurePieceBase,
                 StructurePiecesCollector, StructurePosition,
@@ -38,6 +38,10 @@ impl StructureGenerator for DesertPyramidGenerator {
         &self,
         mut context: StructureGeneratorContext<'_>,
     ) -> Option<StructurePosition> {
+        if context.lowest_y(WIDTH, DEPTH) < context.sea_level {
+            return None;
+        }
+        let start_pos = context.on_top_of_chunk_center();
         let x = start_block_x(context.chunk_x);
         let z = start_block_z(context.chunk_z);
 
@@ -58,7 +62,7 @@ impl StructureGenerator for DesertPyramidGenerator {
         }));
 
         Some(StructurePosition {
-            start_pos: BlockPos::new(x + (WIDTH / 2), 64, z + (DEPTH / 2)),
+            start_pos,
             collector: Arc::new(collector.into()),
         })
     }
@@ -77,30 +81,19 @@ impl DesertPyramidPiece {
         BlockState::from_id(props.to_state_id(&Block::SANDSTONE_STAIRS))
     }
 
-    fn adjust_height(&mut self, chunk: &ProtoChunk, random: &mut RandomGenerator) -> bool {
+    fn update_height_position_to_lowest_ground_height(
+        &mut self,
+        region: &dyn GenerationCache,
+        random: &mut RandomGenerator,
+    ) {
+        let offset = -random.next_bounded_i32(3);
         if self.height_adjusted {
-            return true;
+            return;
         }
-
-        let ground_offset = -(random.next_bounded_i32(3));
-        let bb = self.piece.bounding_box;
-        let mut lowest = i32::MAX;
-
-        for z in bb.min.z..=bb.max.z {
-            for x in bb.min.x..=bb.max.x {
-                let y = chunk.get_top_y(&HeightMap::MotionBlockingNoLeaves, x, z);
-                lowest = lowest.min(y);
-            }
-        }
-
-        if lowest == i32::MAX {
-            return false;
-        }
-
-        let shift_y = lowest - self.piece.bounding_box.min.y + ground_offset;
+        let lowest = lowest_ground_height(region, &self.piece.bounding_box);
+        let shift_y = lowest - self.piece.bounding_box.min.y + offset;
         self.piece.bounding_box.move_pos(0, shift_y, 0);
         self.height_adjusted = true;
-        true
     }
 
     fn place_sand(
@@ -182,10 +175,12 @@ impl DesertPyramidPiece {
         potential_positions.push(sus_pos);
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn try_place_chest(
         &mut self,
         chunk: &mut ProtoChunk,
         bb: &BlockBox,
+        random: &mut RandomGenerator,
         index: usize,
         x: i32,
         y: i32,
@@ -195,17 +190,10 @@ impl DesertPyramidPiece {
             return;
         }
 
-        let world_pos = self.piece.offset_pos(x, y, z);
-        let mut random = RandomGenerator::Legacy(LegacyRand::from_seed(hash_block_pos(
-            world_pos.x,
-            world_pos.y,
-            world_pos.z,
-        ) as u64));
-
         if self.piece.add_chest(
             chunk,
             bb,
-            &mut random,
+            random,
             x,
             y,
             z,
@@ -530,6 +518,24 @@ impl StructurePieceBase for DesertPyramidPiece {
         &mut self.piece
     }
 
+    fn place_in_region(
+        &mut self,
+        region: &mut dyn GenerationCache,
+        block_registry: &dyn crate::world::WorldPortalExt,
+        random: &mut RandomGenerator,
+        seed: i64,
+        chunk_box: &BlockBox,
+    ) {
+        self.update_height_position_to_lowest_ground_height(region, random);
+        self.place(
+            region.get_center_chunk_mut(),
+            block_registry,
+            random,
+            seed,
+            chunk_box,
+        );
+    }
+
     #[expect(clippy::too_many_lines)]
     fn place(
         &mut self,
@@ -540,10 +546,6 @@ impl StructurePieceBase for DesertPyramidPiece {
         chunk_box: &BlockBox,
     ) {
         use pumpkin_util::random::xoroshiro128::Xoroshiro;
-
-        if !self.adjust_height(chunk, random) {
-            return;
-        }
 
         let origin = self.piece.bounding_box.min;
         let mut level_random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(seed as u64));
@@ -860,8 +862,8 @@ impl StructurePieceBase for DesertPyramidPiece {
         self.piece.add_block(chunk, chiseled, 10, -10, 13, bb);
         self.piece.add_block(chunk, cut, 10, -11, 13, bb);
 
-        for (index, x, z) in [(0, 10, 12), (1, 8, 10), (2, 10, 8), (3, 12, 10)] {
-            self.try_place_chest(chunk, bb, index, x, -11, z);
+        for (index, x, z) in [(2, 10, 8), (3, 12, 10), (0, 10, 12), (1, 8, 10)] {
+            self.try_place_chest(chunk, bb, random, index, x, -11, z);
         }
 
         self.add_cellar(chunk, bb, &mut level_random);

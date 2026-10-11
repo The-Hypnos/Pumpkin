@@ -5,7 +5,10 @@ use pumpkin_util::{
 
 use crate::{
     ProtoChunk,
-    generation::structure::{piece::StructurePieceType, structures::StructurePiece},
+    generation::{
+        proto_chunk::GenerationCache,
+        structure::{piece::StructurePieceType, structures::StructurePiece},
+    },
 };
 
 pub const DEFAULT_H_POS: i32 = -1;
@@ -42,75 +45,53 @@ impl ShiftableStructurePiece {
         }
     }
 
-    pub fn adjust_to_average_height(&mut self, chunk: &ProtoChunk) -> bool {
-        let bounding_box = self.piece.bounding_box;
+    pub fn update_average_ground_height(
+        &mut self,
+        chunk: &ProtoChunk,
+        chunk_box: &BlockBox,
+        offset: i32,
+    ) -> bool {
         if self.h_pos >= 0 {
             return true;
         }
+        let bounding_box = self.piece.bounding_box;
+        let Some(height) = average_ground_height(chunk, &bounding_box, chunk_box) else {
+            return false;
+        };
+        self.h_pos = height;
+        self.piece
+            .bounding_box
+            .move_pos(0, height - bounding_box.min.y + offset, 0);
+        true
+    }
+}
 
-        let mut sum_y = 0;
-        let mut count = 0;
-
-        for z in bounding_box.min.z..=bounding_box.max.z {
-            for x in bounding_box.min.x..=bounding_box.max.x {
-                let y = chunk.get_top_y(&HeightMap::OceanFloorWg, x, z);
-                sum_y += y;
+#[must_use]
+pub fn average_ground_height(
+    chunk: &ProtoChunk,
+    bounding_box: &BlockBox,
+    chunk_box: &BlockBox,
+) -> Option<i32> {
+    let mut total = 0;
+    let mut count = 0;
+    for z in bounding_box.min.z..=bounding_box.max.z {
+        for x in bounding_box.min.x..=bounding_box.max.x {
+            if chunk_box.contains(x, 64, z) {
+                total += chunk.get_top_y(&HeightMap::MotionBlockingNoLeaves, x, z);
                 count += 1;
             }
         }
-
-        if count == 0 {
-            return false;
-        }
-
-        self.h_pos = sum_y / count;
-
-        let current_min_y = bounding_box.min.y;
-        let offset = self.h_pos - current_min_y;
-
-        self.piece.bounding_box.min.y += offset;
-        self.piece.bounding_box.max.y += offset;
-
-        true
     }
+    (count > 0).then(|| total / count)
+}
 
-    pub fn adjust_to_min_height(&mut self, chunk: &ProtoChunk, y_offset: i32) -> bool {
-        let bounding_box = self.piece.bounding_box;
-
-        if self.h_pos >= 0 {
-            return true;
+#[must_use]
+pub fn lowest_ground_height(region: &dyn GenerationCache, bounding_box: &BlockBox) -> i32 {
+    let mut lowest = i32::MAX;
+    for z in bounding_box.min.z..=bounding_box.max.z {
+        for x in bounding_box.min.x..=bounding_box.max.x {
+            lowest = lowest.min(region.get_top_y(&HeightMap::MotionBlockingNoLeaves, x, z));
         }
-
-        let mut min_y = i32::MAX;
-        let mut found_any = false;
-
-        // Iterate over the X/Z footprint of the bounding box
-        for z in bounding_box.min.z..=bounding_box.max.z {
-            for x in bounding_box.min.x..=bounding_box.max.x {
-                // Vanilla uses MOTION_BLOCKING_NO_LEAVES.
-                // In Pumpkin/Standard generation, OceanFloorWg is usually the closest equivalent for terrain height.
-                let y = chunk.get_top_y(&HeightMap::OceanFloorWg, x, z);
-
-                if y < min_y {
-                    min_y = y;
-                }
-                found_any = true;
-            }
-        }
-
-        // Should only return false if the bounding box has no area (width or depth is 0)
-        if !found_any {
-            return false;
-        }
-
-        self.h_pos = min_y;
-
-        // Calculate shift: (Target Height - Current Height) + Offset
-        let current_y = bounding_box.min.y;
-        let shift_y = (self.h_pos - current_y) + y_offset;
-
-        self.piece.bounding_box.min.y += shift_y;
-        self.piece.bounding_box.max.y += shift_y;
-        true
     }
+    lowest
 }

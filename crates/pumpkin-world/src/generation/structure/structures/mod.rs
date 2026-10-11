@@ -659,14 +659,16 @@ impl StructurePiece {
         use pumpkin_nbt::compound::NbtCompound;
 
         let world_pos = self.offset_pos(x, y, z);
-        if !bb.contains_pos(&world_pos) {
+        if !bb.contains_pos(&world_pos)
+            || chunk.get_block_state(&world_pos).to_block_id() == Block::DISPENSER.id
+        {
             return false;
         }
 
         let mut props = DispenserLikeProperties::default(&Block::DISPENSER);
         props.facing = facing;
         let state = BlockState::from_id(props.to_state_id(&Block::DISPENSER));
-        chunk.set_block_state(world_pos.x, world_pos.y, world_pos.z, state);
+        self.add_block(chunk, state, x, y, z, bb);
 
         let mut nbt = NbtCompound::new();
         nbt.put_string("id", "minecraft:dispenser".to_string());
