@@ -150,7 +150,7 @@ pub fn build() -> TokenStream {
                 EnvironmentScanPlacementModifier, HeightRangePlacementModifier,
                 HeightmapPlacementModifier, NoiseBasedCountPlacementModifier,
                 NoiseThresholdCountPlacementModifier, RandomOffsetPlacementModifier,
-                RarityFilterPlacementModifier, SquarePlacementModifier,
+                RandomChancePlacementModifier, RarityFilterPlacementModifier, SquarePlacementModifier,
                 SurfaceThresholdFilterPlacementModifier, SurfaceWaterDepthFilterPlacementModifier,
                 PlacedFeatureWrapper,
             };
@@ -164,7 +164,9 @@ pub fn build() -> TokenStream {
                 ore::{OreFeature, OreTarget},
                 random_boolean_selector::RandomBooleanFeature,
                 random_patch::RandomPatchFeature,
+                overlay::OverlayFeature,
                 random_selector::{RandomFeature, RandomFeatureEntry},
+                sequence::SequenceFeature,
                 weighted_random_selector::{WeightedRandomFeature, WeightedRandomFeatureEntry},
                 sea_pickle::SeaPickleFeature,
                 seagrass::SeagrassFeature,
@@ -424,6 +426,17 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
                     y_spread: #y,
                     feature: Box::new(#feature),
                 })
+            }
+        }
+        "minecraft:sequence" | "minecraft:overlay" => {
+            let features: Vec<TokenStream> = config["features"]
+                .as_array()
+                .map(|arr| arr.iter().map(value_to_placed_feature_wrapper).collect())
+                .unwrap_or_default();
+            if type_str == "minecraft:sequence" {
+                quote! { ConfiguredFeature::Sequence(SequenceFeature { features: vec![#(#features),*] }) }
+            } else {
+                quote! { ConfiguredFeature::Overlay(OverlayFeature { features: vec![#(#features),*] }) }
             }
         }
         "minecraft:random_selector" => {
@@ -998,7 +1011,9 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
             quote! { ConfiguredFeature::DripstoneCluster(crate::generation::feature::features::drip_stone::cluster::DripstoneClusterFeature {}) }
         }
         // TODO: 26.3 feature types that still need an implementation.
-        "minecraft:sequence" | "minecraft:stepped_column_cluster" => {
+        "minecraft:stepped_column_cluster"
+        | "minecraft:single_block_pillar"
+        | "minecraft:template" => {
             quote! { ConfiguredFeature::NoOp }
         }
         "minecraft:large_dripstone" => {
@@ -1010,8 +1025,6 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
             let spread_attempts = config["spread_attempts"].as_u64().unwrap() as i32;
             let growth_rounds = config["growth_rounds"].as_u64().unwrap() as i32;
             let spread_rounds = config["spread_rounds"].as_u64().unwrap() as i32;
-            let extra_rare_growths = value_to_int_provider(&config["extra_rare_growths"]);
-            let catalyst_chance = config["catalyst_chance"].as_f64().unwrap() as f32;
             quote! {
                 ConfiguredFeature::SculkPatch(crate::generation::feature::features::sculk_patch::SculkPatchFeature {
                     charge_count: #charge_count,
@@ -1019,8 +1032,6 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
                     spread_attempts: #spread_attempts,
                     growth_rounds: #growth_rounds,
                     spread_rounds: #spread_rounds,
-                    extra_rare_growths: #extra_rare_growths,
-                    catalyst_chance: #catalyst_chance,
                 })
             }
         }
@@ -1057,7 +1068,7 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
         "minecraft:desert_well" => {
             quote! { ConfiguredFeature::DesertWell(crate::generation::feature::features::desert_well::DesertWellFeature) }
         }
-        "minecraft:overlay" | "minecraft:random_neighbor_spread" => {
+        "minecraft:random_neighbor_spread" => {
             quote! { ConfiguredFeature::NoOp }
         }
         other => {
@@ -1914,6 +1925,10 @@ fn value_to_placement_modifier_cf(v: &Value) -> TokenStream {
         "minecraft:rarity_filter" => {
             let ch = v["chance"].as_u64().unwrap_or(1) as u32;
             quote! { PlacementModifier::RarityFilter(RarityFilterPlacementModifier { chance: #ch }) }
+        }
+        "minecraft:random_chance" => {
+            let ch = v["chance"].as_f64().unwrap_or(1.0) as f32;
+            quote! { PlacementModifier::RandomChance(RandomChancePlacementModifier { chance: #ch }) }
         }
         "minecraft:block_predicate_filter" => {
             let pred = value_to_block_predicate(&v["predicate"]);
