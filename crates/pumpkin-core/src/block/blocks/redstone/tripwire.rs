@@ -129,11 +129,12 @@ impl BlockBehaviour for TripwireBlock {
     }
 
     fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
-        if args.moved || Block::from_state_id(args.old_state_id) == args.block {
+        if args.moved {
             return;
         }
-        let state_id = args.world.get_block_state_id(args.position);
-        Self::update(args.world, args.position, state_id);
+        let mut props = TripwireProperties::from_state_id(args.old_state_id);
+        props.powered = true;
+        Self::update(args.world, args.position, props.to_state_id(args.block));
     }
 }
 

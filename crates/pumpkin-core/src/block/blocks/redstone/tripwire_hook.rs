@@ -265,14 +265,16 @@ impl TripwireHookBlock {
             for l in 1..j {
                 let current_wrie_pos =
                     start_hook_pos.offset_dir(start_hook_props.facing.to_offset(), l);
-                if let Some(mut lv8) = wires_props[l as usize] {
+                let current_block = world.get_block(&current_wrie_pos);
+                if let Some(mut lv8) = wires_props[l as usize]
+                    && (current_block == &Block::TRIPWIRE || current_block == &Block::TRIPWIRE_HOOK)
+                {
                     lv8.attached = future_attached;
                     world.set_block_state(
                         &current_wrie_pos,
                         lv8.to_state_id(&Block::TRIPWIRE),
                         BlockFlags::NOTIFY_ALL,
                     );
-                    // if world.get_block(&lv7) != Block::AIR {}
                 }
             }
         }
