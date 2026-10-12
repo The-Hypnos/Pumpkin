@@ -99,28 +99,8 @@ impl BlockBehaviour for TripwireHookBlock {
     }
 
     fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
-        if args.moved || Block::from_state_id(args.old_state_id) == args.block {
-            return;
-        }
-        let props = TripwireHookProperties::from_state_id(args.old_state_id);
-        if props.powered || props.attached {
-            Self::update(
-                args.world,
-                *args.position,
-                args.old_state_id,
-                true,
-                false,
-                -1,
-                None,
-            );
-        }
-        if props.powered {
-            Self::update_neighbors_on_axis(
-                args.block,
-                args.world,
-                *args.position,
-                props.facing.to_block_direction(),
-            );
+        if !args.moved {
+            Self::on_removed(args.world, *args.position, args.old_state_id);
         }
     }
 
@@ -150,6 +130,21 @@ impl BlockBehaviour for TripwireHookBlock {
 }
 
 impl TripwireHookBlock {
+    fn on_removed(world: &Arc<World>, pos: BlockPos, state_id: BlockStateId) {
+        let props = TripwireHookProperties::from_state_id(state_id);
+        if props.attached || props.powered {
+            Self::update(world, pos, state_id, true, false, -1, None);
+        }
+        if props.powered {
+            Self::update_neighbors_on_axis(
+                &Block::TRIPWIRE_HOOK,
+                world,
+                pos,
+                props.facing.to_block_direction(),
+            );
+        }
+    }
+
     fn can_survive(
         world: &dyn BlockAccessor,
         block_pos: &BlockPos,
@@ -239,6 +234,14 @@ impl TripwireHookBlock {
                 end_hook_pos,
                 BlockDirection::from_cardinal_direction(future_hook_facing),
             );
+            if world.get_block(&start_hook_pos) != &Block::TRIPWIRE_HOOK {
+                Self::on_removed(
+                    world,
+                    start_hook_pos,
+                    future_hook_state.to_state_id(&Block::TRIPWIRE_HOOK),
+                );
+                return;
+            }
             Self::play_sound(
                 world,
                 &end_hook_pos,
