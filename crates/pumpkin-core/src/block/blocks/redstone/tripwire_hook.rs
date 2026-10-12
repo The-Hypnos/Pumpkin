@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use pumpkin_data::{
-    Block, BlockDirection, BlockStateId, HorizontalFacingExt,
+    Block, BlockDirection, BlockStateId, FacingExt, HorizontalFacingExt,
+    block_properties::HorizontalFacing,
     sound::{Sound, SoundCategory},
 };
 use pumpkin_macros::pumpkin_block;
@@ -14,10 +15,11 @@ use rand::{RngExt, rng};
 
 use crate::{
     block::{
-        BlockBehaviour, CanPlaceAtArgs, EmitsRedstonePowerArgs, GetRedstonePowerArgs,
-        GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs,
-        PlayerPlacedArgs,
+        BlockBehaviour, BlockIsReplacing, CanPlaceAtArgs, EmitsRedstonePowerArgs,
+        GetRedstonePowerArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs,
+        OnStateReplacedArgs, PlayerPlacedArgs,
     },
+    entity::EntityBase,
     world::World,
 };
 
@@ -29,24 +31,37 @@ pub struct TripwireHookBlock;
 
 impl BlockBehaviour for TripwireHookBlock {
     fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut directions = args.player.get_entity().get_entity_facing_order();
+        if args.replacing == BlockIsReplacing::None {
+            let face = args.direction.to_facing();
+            if let Some(index) = directions.iter().position(|dir| *dir == face) {
+                directions.copy_within(0..index, 1);
+                directions[0] = face;
+            }
+        }
+
         let mut props = TripwireHookProperties::default(args.block);
         props.powered = false;
         props.attached = false;
-        if Self::can_place_at(args.world, args.position, args.direction) {
-            props.facing = args.direction.opposite().to_cardinal_direction();
-            return props.to_state_id(args.block);
+        for dir in directions {
+            if let Some(facing) = dir.opposite().to_horizontal_facing()
+                && Self::can_survive(args.world, args.position, facing)
+            {
+                props.facing = facing;
+                return props.to_state_id(args.block);
+            }
         }
-        args.block.default_state.id
+        Block::AIR.default_state.id
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
+        if args.player.is_some() {
+            return BlockDirection::horizontal()
+                .into_iter()
+                .any(|facing| Self::can_survive(args.block_accessor, args.position, facing));
+        }
         let props = TripwireHookProperties::from_state_id(args.state.id);
-
-        Self::can_place_at(
-            args.block_accessor,
-            args.position,
-            props.facing.to_block_direction(),
-        )
+        Self::can_survive(args.block_accessor, args.position, props.facing)
     }
 
     fn player_placed(&self, args: PlayerPlacedArgs<'_>) {
@@ -65,10 +80,12 @@ impl BlockBehaviour for TripwireHookBlock {
         &self,
         args: GetStateForNeighborUpdateArgs<'_>,
     ) -> BlockStateId {
-        if args.direction.to_horizontal_facing().is_some_and(|facing| {
-            let props = TripwireHookProperties::from_state_id(args.state_id);
-            facing.opposite() == props.facing
-        }) && !Self::can_place_at(args.world, args.position, args.direction)
+        let props = TripwireHookProperties::from_state_id(args.state_id);
+        if args
+            .direction
+            .to_horizontal_facing()
+            .is_some_and(|facing| facing.opposite() == props.facing)
+            && !Self::can_survive(args.world, args.position, props.facing)
         {
             Block::AIR.default_state.id
         } else {
@@ -133,17 +150,15 @@ impl BlockBehaviour for TripwireHookBlock {
 }
 
 impl TripwireHookBlock {
-    pub fn can_place_at(
+    fn can_survive(
         world: &dyn BlockAccessor,
         block_pos: &BlockPos,
-        face: BlockDirection,
+        facing: HorizontalFacing,
     ) -> bool {
-        if !face.is_horizontal() {
-            return false;
-        }
-        let place_block_pos = block_pos.offset(face.to_offset());
-        let place_block_state = world.get_block_state(&place_block_pos);
-        place_block_state.is_side_solid(face)
+        let wall_pos = block_pos.offset(facing.opposite().to_offset());
+        world
+            .get_block_state(&wall_pos)
+            .is_side_solid(facing.to_block_direction())
     }
 
     #[expect(clippy::too_many_lines)]
