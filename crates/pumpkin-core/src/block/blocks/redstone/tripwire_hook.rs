@@ -98,10 +98,11 @@ impl BlockBehaviour for TripwireHookBlock {
             );
         }
         if props.powered {
-            args.world.update_neighbor(args.position, args.block);
-            args.world.update_neighbor(
-                &args.position.offset(props.facing.opposite().to_offset()),
+            Self::update_neighbors_on_axis(
                 args.block,
+                args.world,
+                *args.position,
+                props.facing.to_block_direction(),
             );
         }
     }
@@ -310,10 +311,11 @@ impl TripwireHookBlock {
         block_pos: BlockPos,
         direction: BlockDirection,
     ) {
-        world.update_neighbor(&block_pos, block);
-        world.update_neighbors(
+        world.update_neighbors_at(&block_pos, block, None);
+        world.update_neighbors_at(
             &block_pos.offset(direction.opposite().to_offset()),
-            Some(direction),
+            block,
+            None,
         );
     }
 }
