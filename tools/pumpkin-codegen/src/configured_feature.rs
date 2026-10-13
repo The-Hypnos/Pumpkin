@@ -152,7 +152,7 @@ pub fn build() -> TokenStream {
                 HeightmapPlacementModifier, NoiseBasedCountPlacementModifier,
                 NoiseThresholdCountPlacementModifier, OffsetPlacementModifier,
                 RandomOffsetPlacementModifier,
-                RarityFilterPlacementModifier, SquarePlacementModifier,
+                RandomChancePlacementModifier, RarityFilterPlacementModifier, SquarePlacementModifier,
                 SurfaceThresholdFilterPlacementModifier, SurfaceWaterDepthFilterPlacementModifier,
                 PlacedFeatureWrapper,
             };
@@ -1004,7 +1004,15 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
             quote! { ConfiguredFeature::DripstoneCluster(crate::generation::feature::features::drip_stone::cluster::DripstoneClusterFeature {}) }
         }
         "minecraft:sequence" => {
-            quote! { ConfiguredFeature::NoOp }
+            let features: Vec<TokenStream> = config["features"]
+                .as_array()
+                .map(|a| a.iter().map(value_to_placed_feature_wrapper).collect())
+                .unwrap_or_default();
+            quote! {
+                ConfiguredFeature::Sequence(crate::generation::feature::features::sequence::SequenceFeature {
+                    features: vec![#(#features),*],
+                })
+            }
         }
         "minecraft:stepped_column_cluster" => {
             let block = value_to_block_state_provider(&config["block"]);
@@ -1046,8 +1054,6 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
             let spread_attempts = config["spread_attempts"].as_u64().unwrap() as i32;
             let growth_rounds = config["growth_rounds"].as_u64().unwrap() as i32;
             let spread_rounds = config["spread_rounds"].as_u64().unwrap() as i32;
-            let extra_rare_growths = value_to_int_provider(&config["extra_rare_growths"]);
-            let catalyst_chance = config["catalyst_chance"].as_f64().unwrap() as f32;
             quote! {
                 ConfiguredFeature::SculkPatch(crate::generation::feature::features::sculk_patch::SculkPatchFeature {
                     charge_count: #charge_count,
@@ -1055,8 +1061,6 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
                     spread_attempts: #spread_attempts,
                     growth_rounds: #growth_rounds,
                     spread_rounds: #spread_rounds,
-                    extra_rare_growths: #extra_rare_growths,
-                    catalyst_chance: #catalyst_chance,
                 })
             }
         }
@@ -2057,6 +2061,10 @@ fn value_to_placement_modifier_cf(v: &Value) -> TokenStream {
         "minecraft:rarity_filter" => {
             let ch = v["chance"].as_u64().unwrap_or(1) as u32;
             quote! { PlacementModifier::RarityFilter(RarityFilterPlacementModifier { chance: #ch }) }
+        }
+        "minecraft:random_chance" => {
+            let ch = v["chance"].as_f64().unwrap_or(1.0) as f32;
+            quote! { PlacementModifier::RandomChance(RandomChancePlacementModifier { chance: #ch }) }
         }
         "minecraft:block_predicate_filter" => {
             let pred = value_to_block_predicate(&v["predicate"]);

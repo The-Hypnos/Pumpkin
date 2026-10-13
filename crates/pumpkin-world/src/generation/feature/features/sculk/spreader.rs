@@ -23,9 +23,7 @@ pub const MAX_CURSORS: usize = 32;
 pub const MAX_CHARGE: u16 = 1000;
 /// Maximum chessboard distance from origin before a cursor is discarded.
 const MAX_CURSOR_DISTANCE: i32 = 1024;
-/// Squared XZ radius limit during world generation: cursors are discarded
-/// once `dx² + dz² >= 225` (15 blocks from the origin).
-const WORLD_GEN_RADIUS_SQ: i64 = 225;
+const MAX_WORLDGEN_SPREAD: i32 = 12;
 
 /// Configuration values extracted from [`SculkSpreader`] so that cursor
 /// updates do not require borrowing the spreader while iterating.
@@ -338,21 +336,17 @@ impl ChargeCursor {
         }
 
         // Attempt movement.
-        if let Some(new_pos) = Self::valid_movement_position(level, self.pos, random) {
+        if let Some(new_pos) = Self::valid_movement_position(
+            level,
+            self.pos,
+            origin_pos,
+            config.is_world_generation,
+            random,
+        ) {
             if current_id == BlockId::SCULK_VEIN {
                 VeinRules::on_discharged(level, self.pos);
             }
             self.pos = new_pos;
-
-            // World-gen radius limit (XZ only): `dx² + dz² >= 225`.
-            if config.is_world_generation {
-                let dx = (self.pos.0.x - origin_pos.0.x) as i64;
-                let dz = (self.pos.0.z - origin_pos.0.z) as i64;
-                if dx * dx + dz * dz >= WORLD_GEN_RADIUS_SQ {
-                    self.charge = 0;
-                    return;
-                }
-            }
 
             // Update faces from the new position's block.
             if let Some(state) = level.sculk_get(self.pos) {
@@ -361,6 +355,12 @@ impl ChargeCursor {
                     self.faces = Some(Self::available_faces(state, id));
                 }
             }
+        } else if config.is_world_generation {
+            if current_id == BlockId::SCULK_VEIN {
+                VeinRules::on_discharged(level, self.pos);
+            }
+            self.charge = 0;
+            return;
         }
 
         // Update delays.
@@ -515,6 +515,8 @@ impl ChargeCursor {
     fn valid_movement_position(
         level: &dyn SculkLevel,
         pos: BlockPos,
+        origin_pos: BlockPos,
+        is_world_generation: bool,
         random: &mut RandomGenerator,
     ) -> Option<BlockPos> {
         let mut result = None;
@@ -529,6 +531,12 @@ impl ChargeCursor {
         for &idx in &order {
             let offset = NON_CORNER_NEIGHBOURS[idx as usize];
             let neighbour = pos.offset(offset);
+            if is_world_generation
+                && (origin_pos.0.x - neighbour.0.x).pow(2) + (origin_pos.0.z - neighbour.0.z).pow(2)
+                    > MAX_WORLDGEN_SPREAD.pow(2)
+            {
+                continue;
+            }
 
             let Some(state) = level.sculk_get(neighbour) else {
                 continue;
@@ -737,7 +745,7 @@ mod tests {
         level.set_id(pos.up(), Block::SCULK_SENSOR.default_state.id);
         let mut random = RandomGenerator::Legacy(LegacyRand::from_seed(1));
         assert_eq!(
-            ChargeCursor::valid_movement_position(&level, pos, &mut random),
+            ChargeCursor::valid_movement_position(&level, pos, pos, true, &mut random),
             None,
         );
     }
@@ -755,7 +763,7 @@ mod tests {
         level.set_id(pos.east(), Block::SCULK.default_state.id);
         let mut random = RandomGenerator::Legacy(LegacyRand::from_seed(1));
         assert_eq!(
-            ChargeCursor::valid_movement_position(&level, pos, &mut random),
+            ChargeCursor::valid_movement_position(&level, pos, pos, true, &mut random),
             Some(pos.up()),
         );
     }
@@ -769,7 +777,7 @@ mod tests {
         level.set_id(pos.east(), Block::SCULK.default_state.id);
         let mut random = RandomGenerator::Legacy(LegacyRand::from_seed(1));
         assert_eq!(
-            ChargeCursor::valid_movement_position(&level, pos, &mut random),
+            ChargeCursor::valid_movement_position(&level, pos, pos, true, &mut random),
             Some(pos.east()),
         );
     }
