@@ -9,7 +9,7 @@ use crate::entity::EntityBase;
 #[must_use]
 pub fn create(
     can_attack: impl Fn(&BrainTick<'_>) -> bool + Send + Sync + 'static,
-    target_finder: impl Fn(&BrainTick<'_>) -> Option<Arc<dyn EntityBase>> + Send + Sync + 'static,
+    target_finder: impl Fn(&mut BrainTick<'_>) -> Option<Arc<dyn EntityBase>> + Send + Sync + 'static,
 ) -> OneShot {
     OneShot::new(
         "StartAttacking",
@@ -64,7 +64,7 @@ mod tests {
     }
 
     fn brain_with(
-        finder: impl Fn(&BrainTick<'_>) -> Option<Arc<dyn EntityBase>> + Send + Sync + 'static,
+        finder: impl Fn(&mut BrainTick<'_>) -> Option<Arc<dyn EntityBase>> + Send + Sync + 'static,
     ) -> Brain {
         let mut brain = Brain::default();
         brain.add_activity(ActivityData::with_priority_start(

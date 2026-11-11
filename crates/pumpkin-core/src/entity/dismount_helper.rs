@@ -71,8 +71,7 @@ fn can_dismount_to(world: &World, bounding_box: &BoundingBox) -> bool {
         .worldborder
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    border.contains(bounding_box.min.x, bounding_box.min.z)
-        && border.contains(bounding_box.max.x - 1.0E-5, bounding_box.max.z - 1.0E-5)
+    border.contains_bounding_box(bounding_box)
 }
 
 fn block_floor_height(world: &World, pos: &BlockPos) -> f64 {

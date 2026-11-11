@@ -1,0 +1,10 @@
+{
+  "type": "minecraft:function",
+  "environment": "minecraft:default",
+  "structure": "minecraft:empty",
+  "function": "pumpkin:nautilus_charges_the_mob_that_hurt_it",
+  "max_ticks": 200,
+  "setup_ticks": 0,
+  "max_attempts": 3,
+  "required_successes": 1
+}

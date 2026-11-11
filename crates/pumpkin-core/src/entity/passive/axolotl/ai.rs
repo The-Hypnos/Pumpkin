@@ -273,7 +273,7 @@ fn speed_modifier(mob: &dyn Mob) -> f32 {
     }
 }
 
-fn find_nearest_valid_attack_target(tick: &BrainTick<'_>) -> Option<Arc<dyn EntityBase>> {
+fn find_nearest_valid_attack_target(tick: &mut BrainTick<'_>) -> Option<Arc<dyn EntityBase>> {
     if utils::is_breeding(tick.state) {
         None
     } else {

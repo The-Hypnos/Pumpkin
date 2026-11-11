@@ -200,6 +200,13 @@ impl Worldborder {
     }
 
     #[must_use]
+    pub fn contains_bounding_box(&self, bounding_box: &BoundingBox) -> bool {
+        let margin = f64::from(1.0E-5f32);
+        self.contains(bounding_box.min.x, bounding_box.min.z)
+            && self.contains(bounding_box.max.x - margin, bounding_box.max.z - margin)
+    }
+
+    #[must_use]
     pub fn contains_block(&self, x: i32, z: i32) -> bool {
         self.contains(f64::from(x), f64::from(z))
             && self.contains(f64::from(x + 1), f64::from(z + 1))

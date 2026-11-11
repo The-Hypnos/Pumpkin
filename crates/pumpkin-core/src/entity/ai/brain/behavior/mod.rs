@@ -7,6 +7,7 @@ use super::memory::position_tracker::PositionTracker;
 pub mod animal_make_love;
 pub mod animal_panic;
 pub mod baby_follow_adult;
+pub mod charge_attack;
 pub mod count_down_cooldown_ticks;
 pub mod crisis;
 pub mod croak;
@@ -47,6 +48,7 @@ pub mod work;
 
 pub use animal_make_love::AnimalMakeLove;
 pub use animal_panic::AnimalPanic;
+pub use charge_attack::ChargeAttack;
 pub use count_down_cooldown_ticks::CountDownCooldownTicks;
 pub use do_nothing::DoNothing;
 pub use follow_temptation::FollowTemptation;

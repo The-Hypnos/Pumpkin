@@ -771,17 +771,7 @@ pub fn check_spawn_rules(
             && world.get_block(pos) == &pumpkin_data::Block::WATER;
     }
     if id == EntityType::NAUTILUS.id {
-        let sea_level = world.sea_level;
-        let min_spawn_level = sea_level - 25;
-        return pos.0.y >= min_spawn_level
-            && pos.0.y <= sea_level - 5
-            && world
-                .get_fluid(&pos.down())
-                .has_tag(&pumpkin_data::tag::Fluid::MINECRAFT_WATER)
-            && (world.get_block(&pos.up()) == &pumpkin_data::Block::WATER
-                || world
-                    .get_fluid(&pos.up())
-                    .has_tag(&pumpkin_data::tag::Fluid::MINECRAFT_WATER));
+        return NautilusEntity::check_nautilus_spawn_rules(world, pos);
     }
     if id == EntityType::DROWNED.id {
         let water = |pos: &BlockPos| {

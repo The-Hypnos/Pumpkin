@@ -33,6 +33,13 @@ impl TemptingSensor {
             temptations: |_, stack| stack.item.has_tag(&tag::Item::MINECRAFT_FROG_FOOD),
         }
     }
+
+    #[must_use]
+    pub const fn for_nautilus() -> Self {
+        Self {
+            temptations: |_, stack| stack.item.has_tag(&tag::Item::MINECRAFT_NAUTILUS_FOOD),
+        }
+    }
 }
 
 impl Sensor for TemptingSensor {

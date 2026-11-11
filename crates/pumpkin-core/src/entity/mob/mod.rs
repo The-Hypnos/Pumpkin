@@ -759,17 +759,40 @@ impl MobEntity {
     }
 
     pub fn with_brain<R>(&self, mob: &dyn Mob, callback: impl FnOnce(&mut Brain) -> R) -> R {
+        let slot = self
+            .brain
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.run_brain(slot, mob, callback)
+    }
+
+    pub fn try_with_brain<R>(
+        &self,
+        mob: &dyn Mob,
+        callback: impl FnOnce(&mut Brain) -> R,
+    ) -> Option<R> {
+        let slot = match self.brain.try_lock() {
+            Ok(slot) => slot,
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
+        Some(self.run_brain(slot, mob, callback))
+    }
+
+    fn run_brain<R>(
+        &self,
+        mut slot: std::sync::MutexGuard<'_, Option<Brain>>,
+        mob: &dyn Mob,
+        callback: impl FnOnce(&mut Brain) -> R,
+    ) -> R {
         let result = {
-            let mut slot = self
-                .brain
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let brain = slot.get_or_insert_with(|| mob.make_brain(&PackedMemories::empty()));
             if self.take_brain_memory_clear_request() {
                 brain.clear_memories();
             }
             callback(brain)
         };
+        drop(slot);
         self.process_brain_memory_clear();
         result
     }
@@ -2425,6 +2448,16 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    fn as_nautilus(&self) -> Option<&crate::entity::passive::nautilus::NautilusEntity> {
+        None
+    }
+
+    fn as_zombie_nautilus(
+        &self,
+    ) -> Option<&crate::entity::passive::zombie_nautilus::ZombieNautilusEntity> {
+        None
+    }
+
     fn as_patrolling_monster(&self) -> Option<&dyn patrol::PatrollingMonster> {
         None
     }
@@ -2680,6 +2713,15 @@ pub trait Mob: EntityBase + Send + Sync {
     /// Stores an approved target. Override for side effects of a target change.
     fn apply_mob_target(&self, target: Option<Arc<dyn EntityBase>>) {
         self.get_mob_entity().set_target(target);
+    }
+
+    fn handle_important_interactions(
+        &self,
+        _player: &Arc<Player>,
+        stack: &mut ItemStack,
+    ) -> Option<bool> {
+        (stack.item == &Item::NAME_TAG || stack.item.registry_key.ends_with("_spawn_egg"))
+            .then_some(false)
     }
 
     fn mob_interact(&self, _player: &Arc<Player>, _item_stack: &mut ItemStack) -> bool {

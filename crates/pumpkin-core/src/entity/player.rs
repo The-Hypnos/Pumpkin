@@ -7175,9 +7175,19 @@ impl Player {
         let Some(vehicle) = self.get_entity().get_vehicle() else {
             return false;
         };
-        if let Some(horse) = vehicle.get_mob().and_then(|mob| mob.as_abstract_horse()) {
-            horse.open_custom_inventory_screen(self);
-            return true;
+        if let Some(mob) = vehicle.get_mob() {
+            if let Some(horse) = mob.as_abstract_horse() {
+                horse.open_custom_inventory_screen(self);
+                return true;
+            }
+            if let Some(nautilus) = mob.as_nautilus() {
+                nautilus.open_custom_inventory_screen(self);
+                return true;
+            }
+            if let Some(nautilus) = mob.as_zombie_nautilus() {
+                nautilus.open_custom_inventory_screen(self);
+                return true;
+            }
         }
         if let Some(boat) = vehicle
             .cast_any()
@@ -7199,7 +7209,22 @@ impl Player {
         {
             return;
         }
-        let Some(horse) = vehicle.get_mob().and_then(|mob| mob.as_abstract_horse()) else {
+        let Some(mob) = vehicle.get_mob() else {
+            return;
+        };
+        if let Some(nautilus) = mob.as_nautilus() {
+            if nautilus.can_jump() && jump_scale > 0 {
+                nautilus.handle_start_jump();
+            }
+            return;
+        }
+        if let Some(nautilus) = mob.as_zombie_nautilus() {
+            if nautilus.can_jump() && jump_scale > 0 {
+                nautilus.handle_start_jump();
+            }
+            return;
+        }
+        let Some(horse) = mob.as_abstract_horse() else {
             return;
         };
         if !horse.can_jump() || jump_scale <= 0 {

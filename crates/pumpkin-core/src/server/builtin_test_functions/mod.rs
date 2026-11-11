@@ -21,6 +21,7 @@ mod golems;
 mod lamps_bulbs_and_noteblocks_extended;
 mod leashed_bucket;
 mod loot_tables;
+mod nautilus;
 mod note_and_comparators;
 mod pistons;
 mod pistons_extended;
@@ -140,6 +141,8 @@ pub fn ensure_builtin_test_functions_registered() {
         register_test_function("pumpkin:wither_pattern_spawns", golems::test_wither_pattern_spawns);
         register_test_function("pumpkin:item_entities_merge", entities_and_ai::test_item_entities_merge);
         register_test_function("pumpkin:zombie_pathfinds_to_villager", entities_and_ai::test_zombie_pathfinds_to_villager);
+        register_test_function("pumpkin:nautilus_dries_out_on_land", nautilus::test_nautilus_dries_out_on_land);
+        register_test_function("pumpkin:nautilus_charges_the_mob_that_hurt_it", nautilus::test_nautilus_charges_the_mob_that_hurt_it);
 
         // redstone_wire_and_power
         register_test_function("pumpkin:redstone_wire_attenuation_1_to_4", redstone_wire_and_power::test_redstone_wire_attenuation_1_to_4);

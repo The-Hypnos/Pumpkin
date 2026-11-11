@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
 use crossbeam::atomic::AtomicCell;
@@ -168,7 +169,7 @@ pub trait TamableAnimal: Animal {
 
     fn feed(
         &self,
-        player: &Player,
+        player: &Arc<Player>,
         item_stack: &mut ItemStack,
         healing_factor: f32,
         default_heal: f32,
@@ -176,7 +177,7 @@ pub trait TamableAnimal: Animal {
         let heal = item_stack
             .get_data_component::<FoodImpl>()
             .map_or(default_heal, |food| healing_factor * food.nutrition as f32);
-        item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+        self.use_player_item(player, item_stack);
         self.get_mob_entity().living_entity.heal(heal);
         self.play_eating_sound();
     }

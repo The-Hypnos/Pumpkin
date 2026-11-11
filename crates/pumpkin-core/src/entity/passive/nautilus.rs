@@ -1,253 +1,364 @@
-use crossbeam::atomic::AtomicCell;
 use std::sync::{
-    Arc, Mutex,
+    Arc,
     atomic::{AtomicBool, AtomicI32, Ordering},
 };
-use uuid::Uuid;
 
-use pumpkin_data::BlockState;
+use crossbeam::atomic::AtomicCell;
 use pumpkin_data::{
+    Block, BlockState,
+    damage::DamageType,
     data_component_impl::EquipmentSlot,
     effect::StatusEffect,
-    entity::EntityStatus,
+    entity::{EntityStatus, EntityType},
+    game_event::GameEvent,
+    item::Item,
     item_stack::ItemStack,
-    particle::Particle,
     potion::Effect,
-    sound::{Sound, SoundCategory},
+    sound::Sound,
+    tag::{self, Taggable},
+    tracked_data::TrackedData,
 };
+use pumpkin_inventory::inventory::SimpleInventory;
+use pumpkin_inventory::mount_screen_handler::MountScreenHandler;
 use pumpkin_nbt::compound::NbtCompound;
-use pumpkin_protocol::bedrock::server::ActorEventID;
+use pumpkin_protocol::bedrock::server::actor_event::ActorEventID;
 use pumpkin_util::math::position::BlockPos;
-use pumpkin_util::math::vector3::Vector3;
+use rand::RngExt;
+use uuid::Uuid;
 
-use crate::entity::{
-    Entity, EntityBase,
-    custom_sound::CustomSound,
-    mob::{Mob, MobEntity, equipment::equip_on_target},
-    passive::animal::Animal,
-    player::Player,
+use crate::entity::ageable::{AgeableData, AgeableMob};
+use crate::entity::ai::brain::{
+    Brain,
+    memory::{PackedMemories, types},
 };
+use crate::entity::ai::control::{
+    smooth_swimming_look_control::SmoothSwimmingLookControl,
+    smooth_swimming_move_control::SmoothSwimmingMoveControl,
+};
+use crate::entity::ai::pathfinder::{Navigator, node::PathType};
+use crate::entity::custom_sound::CustomSound;
+use crate::entity::mob::equipment::equip_on_target;
+use crate::entity::mob::neutral::find_by_uuid;
+use crate::entity::mob::spawn::{EntitySpawnReason, SpawnGroupData};
+use crate::entity::mob::{Mob, MobEntity};
+use crate::entity::passive::abstract_horse::{bedrock_equip_slot_nbt, open_mount_inventory};
+use crate::entity::passive::animal::Animal;
+use crate::entity::passive::tamable::{TamableAnimal, TamableData};
+use crate::entity::player::Player;
+use crate::entity::{Entity, EntityBase};
+use crate::item::items::bucket::create_filled_result;
+use crate::world::World;
+
+mod ai;
+
+const SMALL_RESTRICTION_RADIUS: i32 = 16;
+const LARGE_RESTRICTION_RADIUS: i32 = 32;
+const RESTRICTION_RADIUS_BUFFER: i32 = 8;
+const EFFECT_DURATION: i32 = 60;
+const EFFECT_REFRESH_RATE: i64 = 40;
+const NAUTILUS_WATER_RESISTANCE: f64 = 0.9;
+const IN_WATER_SPEED_MODIFIER: f32 = 0.011;
+const DASH_COOLDOWN_TICKS: i32 = 40;
+const DASH_MINIMUM_DURATION_TICKS: i32 = 5;
+const NAUTILUS_TOTAL_AIR_SUPPLY: i32 = 300;
+const DRY_OUT_AIR_SUPPLY: i32 = -20;
+const DRY_OUT_DAMAGE: f32 = 2.0;
+const TAMING_CHANCE: i32 = 3;
+const FEED_HEALING_FACTOR: f32 = 2.0;
+const FEED_DEFAULT_HEAL: f32 = 1.0;
+pub(super) const INVENTORY_COLUMNS: i32 = 0;
 
 pub struct NautilusEntity {
     pub mob_entity: MobEntity,
-    pub ageable_data: crate::entity::ageable::AgeableData,
-    pub is_tame: AtomicBool,
-    pub owner: AtomicCell<Option<Uuid>>,
-    pub is_dashing: AtomicBool,
-    pub dash_cooldown: AtomicI32,
-    pub inventory: Mutex<Vec<ItemStack>>,
+    ageable_data: AgeableData,
+    tamable_data: TamableData,
+    dashing: AtomicBool,
+    dash_cooldown: AtomicI32,
+    inventory: Arc<SimpleInventory>,
+    pending_anger_target: AtomicCell<Option<Uuid>>,
 }
 
 impl NautilusEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
-        let mob_entity = MobEntity::new(entity);
-        let nautilus = Self {
+        entity
+            .air_supply
+            .store(NAUTILUS_TOTAL_AIR_SUPPLY, Ordering::Relaxed);
+        let mut mob_entity = MobEntity::new(entity);
+        *mob_entity
+            .move_control
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Box::new(
+            SmoothSwimmingMoveControl::new(85, 10, IN_WATER_SPEED_MODIFIER, 0.0, true),
+        );
+        *mob_entity
+            .look_control
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Box::new(SmoothSwimmingLookControl::new(10));
+        let navigator = mob_entity
+            .navigator
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *navigator = Navigator::water_bound(false);
+        navigator.set_pathfinding_malus(PathType::Water, 0.0);
+        Arc::new(Self {
             mob_entity,
-            ageable_data: crate::entity::ageable::AgeableData::default(),
-            is_tame: AtomicBool::new(false),
-            owner: AtomicCell::new(None),
-            is_dashing: AtomicBool::new(false),
+            ageable_data: AgeableData::default(),
+            tamable_data: TamableData::default(),
+            dashing: AtomicBool::new(false),
             dash_cooldown: AtomicI32::new(0),
-            inventory: Mutex::new(vec![ItemStack::new(0, &pumpkin_data::item::Item::AIR); 9]),
-        };
-
-        Arc::new(nautilus)
+            inventory: Arc::new(SimpleInventory::new(0)),
+            pending_anger_target: AtomicCell::new(None),
+        })
     }
 
+    pub fn check_nautilus_spawn_rules(world: &World, pos: &BlockPos) -> bool {
+        let sea_level = world.sea_level;
+        let min_spawn_level = sea_level - 25;
+        pos.0.y >= min_spawn_level
+            && pos.0.y <= sea_level - 5
+            && world
+                .get_fluid(&pos.down())
+                .has_tag(&tag::Fluid::MINECRAFT_WATER)
+            && world.get_block(&pos.up()) == &Block::WATER
+    }
+
+    #[must_use]
     pub fn is_dashing(&self) -> bool {
-        self.is_dashing.load(Ordering::Relaxed)
+        self.dashing.load(Ordering::Relaxed)
     }
 
     pub fn set_dashing(&self, dashing: bool) {
-        self.is_dashing.store(dashing, Ordering::Relaxed);
-        self.mob_entity
-            .living_entity
-            .entity
-            .set_synced_data(pumpkin_data::tracked_data::nautilus::DASH, dashing);
+        set_abstract_nautilus_dashing(
+            self.get_entity(),
+            &self.dashing,
+            &self.dash_cooldown,
+            pumpkin_data::tracked_data::nautilus::DASH,
+            dashing,
+        );
     }
 
-    pub fn is_tame(&self) -> bool {
-        self.is_tame.load(Ordering::Relaxed)
+    #[must_use]
+    pub fn can_jump(&self) -> bool {
+        self.is_saddled()
     }
 
-    pub fn set_tame(&self, tame: bool, owner: Option<Uuid>) {
-        self.is_tame.store(tame, Ordering::Relaxed);
-        self.owner.store(owner);
+    pub fn handle_start_jump(&self) {
+        handle_abstract_nautilus_start_jump(self, self.get_dash_sound(), |dashing| {
+            self.set_dashing(dashing);
+        });
     }
 
-    pub fn get_ambient_sound(&self) -> Sound {
-        let is_baby = self
-            .mob_entity
-            .living_entity
-            .entity
-            .age
-            .load(Ordering::Relaxed)
-            < 0;
-        let is_water = self
-            .mob_entity
-            .living_entity
-            .entity
-            .touching_water
-            .load(Ordering::Relaxed);
-        if is_baby {
-            if is_water {
-                Sound::EntityBabyNautilusAmbient
-            } else {
-                Sound::EntityBabyNautilusAmbientLand
-            }
-        } else if is_water {
-            Sound::EntityNautilusAmbient
-        } else {
-            Sound::EntityNautilusAmbientLand
-        }
+    pub fn open_custom_inventory_screen(&self, player: &Arc<Player>) {
+        open_mount_inventory(
+            self,
+            player,
+            &self.inventory,
+            INVENTORY_COLUMNS,
+            MountScreenHandler::SLOT_SADDLE,
+            bedrock_equip_slot_nbt("minecraft:saddle", 0),
+            |mob| mob.as_nautilus().map(|nautilus| nautilus.inventory.clone()),
+        );
     }
 
-    pub fn get_dash_sound(&self) -> Sound {
-        let is_water = self
-            .mob_entity
-            .living_entity
-            .entity
-            .touching_water
-            .load(Ordering::Relaxed);
-        if is_water {
+    fn is_baby(&self) -> bool {
+        self.mob_entity.living_entity.is_baby()
+    }
+
+    fn get_dash_sound(&self) -> Sound {
+        if self.get_entity().is_under_water() {
             Sound::EntityNautilusDash
         } else {
             Sound::EntityNautilusDashLand
         }
     }
 
-    pub fn get_dash_ready_sound(&self) -> Sound {
-        let is_water = self
-            .mob_entity
-            .living_entity
-            .entity
-            .touching_water
-            .load(Ordering::Relaxed);
-        if is_water {
+    fn get_dash_ready_sound(&self) -> Sound {
+        if self.get_entity().is_under_water() {
             Sound::EntityNautilusDashReady
         } else {
             Sound::EntityNautilusDashReadyLand
         }
     }
 
-    pub fn get_eat_sound(&self) -> Sound {
-        let is_baby = self
-            .mob_entity
-            .living_entity
-            .entity
-            .age
-            .load(Ordering::Relaxed)
-            < 0;
-        if is_baby {
-            Sound::EntityBabyNautilusEat
+    fn get_nautilus_restriction_radius(&self) -> i32 {
+        if !self.is_baby() && !self.is_saddled() {
+            LARGE_RESTRICTION_RADIUS
         } else {
-            Sound::EntityNautilusEat
+            SMALL_RESTRICTION_RADIUS
+        }
+    }
+
+    fn check_restriction(&self) {
+        let entity = self.get_entity();
+        if entity.is_leashed() || entity.has_passengers() || !self.is_tame() {
+            return;
+        }
+        let radius = self.get_nautilus_restriction_radius();
+        let block_pos = entity.block_pos.load();
+        let mob_entity = &self.mob_entity;
+        let buffered = radius + RESTRICTION_RADIUS_BUFFER;
+        if !mob_entity.has_position_target()
+            || mob_entity
+                .position_target
+                .load()
+                .squared_distance(&block_pos)
+                >= buffered * buffered
+            || radius != mob_entity.position_target_range.load(Ordering::Relaxed)
+        {
+            mob_entity.set_home_to(block_pos, radius);
+        }
+    }
+
+    fn handle_air_supply(&self, pre_tick_air_supply: i32) {
+        let entity = self.get_entity();
+        if self.mob_entity.living_entity.is_alive() && !entity.is_in_water() {
+            entity.set_air_supply(pre_tick_air_supply - 1);
+            if entity.air_supply.load(Ordering::Relaxed) <= DRY_OUT_AIR_SUPPLY {
+                entity.set_air_supply(0);
+                self.damage(self, DRY_OUT_DAMAGE, DamageType::DRY_OUT);
+            }
+        } else {
+            entity.set_air_supply(NAUTILUS_TOTAL_AIR_SUPPLY);
+        }
+    }
+
+    fn is_aggravated(&self) -> bool {
+        self.mob_entity.brain_has_memory_value(types::ANGRY_AT.id())
+            || self
+                .mob_entity
+                .brain_has_memory_value(types::ATTACK_TARGET.id())
+    }
+
+    fn set_anger_target(&self, attacker: &dyn EntityBase) {
+        let uuid = attacker.get_entity().entity_uuid;
+        if self
+            .mob_entity
+            .try_with_brain(self, |brain| {
+                ai::set_anger_target(brain, self, attacker, uuid);
+            })
+            .is_none()
+        {
+            self.pending_anger_target.store(Some(uuid));
+        }
+    }
+
+    fn apply_pending_anger_target(&self) {
+        let Some(uuid) = self.pending_anger_target.take() else {
+            return;
+        };
+        let world = self.get_entity().world.load();
+        if let Some(attacker) = find_by_uuid(&world, uuid) {
+            self.mob_entity.with_brain(self, |brain| {
+                ai::set_anger_target(brain, self, attacker.as_ref(), uuid);
+            });
         }
     }
 }
 
+impl AgeableMob for NautilusEntity {
+    fn get_ageable_data(&self) -> &AgeableData {
+        &self.ageable_data
+    }
+}
+
 impl Animal for NautilusEntity {
+    fn is_food(&self, item_stack: &ItemStack) -> bool {
+        let food_tag = if !self.is_tame() && !self.is_baby() {
+            &tag::Item::MINECRAFT_NAUTILUS_TAMING_ITEMS
+        } else {
+            &tag::Item::MINECRAFT_NAUTILUS_FOOD
+        };
+        item_stack.get_item().has_tag(food_tag)
+    }
+
+    fn use_player_item(&self, player: &Arc<Player>, item_stack: &mut ItemStack) {
+        use_nautilus_player_item(player, item_stack);
+    }
+
     fn play_eating_sound(&self) {
-        self.make_sound(if self.mob_entity.living_entity.is_baby() {
+        self.make_sound(if self.is_baby() {
             Sound::EntityBabyNautilusEat
         } else {
             Sound::EntityNautilusEat
         });
     }
 
-    fn is_food(&self, item_stack: &ItemStack) -> bool {
-        item_stack.item == &pumpkin_data::item::Item::NAUTILUS_SHELL
-            || item_stack.item == &pumpkin_data::item::Item::PUFFERFISH
-            || item_stack.item == &pumpkin_data::item::Item::COD
-            || item_stack.item == &pumpkin_data::item::Item::SALMON
-            || item_stack.item == &pumpkin_data::item::Item::TROPICAL_FISH
+    fn get_breed_offspring(&self, _partner: &dyn EntityBase) -> Arc<dyn EntityBase> {
+        let entity = self.get_entity();
+        let baby = Self::new(Entity::new(
+            entity.world.load_full(),
+            entity.pos.load(),
+            &EntityType::NAUTILUS,
+        ));
+        if self.is_tame() {
+            baby.set_owner(self.get_owner());
+            baby.set_tame(true);
+        }
+        baby
+    }
+}
+
+impl TamableAnimal for NautilusEntity {
+    fn get_tamable_data(&self) -> &TamableData {
+        &self.tamable_data
     }
 }
 
 impl CustomSound for NautilusEntity {
     fn hurt_sound(&self) -> Option<Sound> {
-        let entity = self.get_entity();
-        let is_baby = entity.age.load(Ordering::Relaxed) < 0;
-        let is_water = entity.touching_water.load(Ordering::Relaxed);
-        Some(if is_baby {
-            if is_water {
-                Sound::EntityBabyNautilusHurt
-            } else {
-                Sound::EntityBabyNautilusHurtLand
-            }
-        } else if is_water {
-            Sound::EntityNautilusHurt
-        } else {
-            Sound::EntityNautilusHurtLand
+        let under_water = self.get_entity().is_under_water();
+        Some(match (self.is_baby(), under_water) {
+            (true, true) => Sound::EntityBabyNautilusHurt,
+            (true, false) => Sound::EntityBabyNautilusHurtLand,
+            (false, true) => Sound::EntityNautilusHurt,
+            (false, false) => Sound::EntityNautilusHurtLand,
         })
     }
 
     fn death_sound(&self) -> Option<Sound> {
-        let entity = self.get_entity();
-        let is_baby = entity.age.load(Ordering::Relaxed) < 0;
-        let is_water = entity.touching_water.load(Ordering::Relaxed);
-        Some(if is_baby {
-            if is_water {
-                Sound::EntityBabyNautilusDeath
-            } else {
-                Sound::EntityBabyNautilusDeathLand
-            }
-        } else if is_water {
-            Sound::EntityNautilusDeath
-        } else {
-            Sound::EntityNautilusDeathLand
+        let under_water = self.get_entity().is_under_water();
+        Some(match (self.is_baby(), under_water) {
+            (true, true) => Sound::EntityBabyNautilusDeath,
+            (true, false) => Sound::EntityBabyNautilusDeathLand,
+            (false, true) => Sound::EntityNautilusDeath,
+            (false, false) => Sound::EntityNautilusDeathLand,
         })
-    }
-}
-
-impl crate::entity::ageable::AgeableMob for NautilusEntity {
-    fn get_ageable_data(&self) -> &crate::entity::ageable::AgeableData {
-        &self.ageable_data
     }
 }
 
 impl Mob for NautilusEntity {
-    fn as_ageable(&self) -> Option<&dyn crate::entity::ageable::AgeableMob> {
-        Some(self)
+    fn get_mob_entity(&self) -> &MobEntity {
+        &self.mob_entity
     }
 
-    fn can_dispenser_equip_into_slot(&self, slot: &EquipmentSlot) -> bool {
-        *slot == EquipmentSlot::BODY
-            || *slot == EquipmentSlot::SADDLE
-            || self.mob_entity.can_pick_up_loot()
+    fn make_brain(&self, packed: &PackedMemories) -> Brain {
+        ai::make_brain(self, packed)
     }
 
-    fn is_tamed(&self) -> bool {
-        self.is_tame()
+    fn custom_server_ai_step(&self, _caller: &dyn EntityBase) {
+        self.apply_pending_anger_target();
+        self.mob_entity.tick_brain(self);
+        let attack_target = self.mob_entity.with_brain(self, |brain| {
+            ai::update_activity(brain);
+            brain.get(types::ATTACK_TARGET).cloned()
+        });
+        self.mob_entity.set_target(attack_target);
+        self.check_restriction();
     }
 
-    fn get_owner_uuid(&self) -> Option<Uuid> {
-        self.owner.load()
+    fn finalize_spawn(
+        &self,
+        _world: &Arc<World>,
+        _reason: EntitySpawnReason,
+        group_data: Option<SpawnGroupData>,
+    ) -> Option<SpawnGroupData> {
+        self.mob_entity
+            .with_brain(self, |brain| ai::init_memories(brain, self));
+        self.finalize_spawn_super(group_data)
     }
 
-    fn mob_controlling_passenger(&self) -> Option<Arc<dyn EntityBase>> {
-        self.saddled_controlling_passenger(None)
-    }
-
-    fn mob_get_swim_sound(&self) -> Option<Sound> {
-        let is_baby = self
-            .mob_entity
-            .living_entity
-            .entity
-            .age
-            .load(Ordering::Relaxed)
-            < 0;
-        Some(if is_baby {
-            Sound::EntityBabyNautilusSwim
-        } else {
-            Sound::EntityNautilusSwim
-        })
-    }
-
-    /// Vanilla `AbstractNautilus` steps silently.
-    fn mob_play_step_sound(&self, _pos: &BlockPos, _state: &BlockState) {}
-
-    fn as_custom_sound(&self) -> Option<&dyn crate::entity::custom_sound::CustomSound> {
+    fn as_ageable(&self) -> Option<&dyn AgeableMob> {
         Some(self)
     }
 
@@ -255,42 +366,78 @@ impl Mob for NautilusEntity {
         Some(self)
     }
 
-    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
-        nbt.put_bool("IsTame", self.is_tame.load(Ordering::Relaxed));
-        nbt.put_int("DashCooldown", self.dash_cooldown.load(Ordering::Relaxed));
-        if let Some(owner) = self.owner.load() {
-            nbt.put_uuid("Owner", owner);
-        }
+    fn as_tamable(&self) -> Option<&dyn TamableAnimal> {
+        Some(self)
     }
 
-    fn mob_read_nbt(&self, nbt: &NbtCompound) {
-        self.mob_entity
-            .read_legacy_saddle(nbt.get_bool("Saddled") == Some(true));
-        if let Some(is_tame) = nbt.get_bool("IsTame") {
-            self.is_tame.store(is_tame, Ordering::Relaxed);
-        }
-        if let Some(dash) = nbt.get_int("DashCooldown") {
-            self.dash_cooldown.store(dash, Ordering::Relaxed);
-        }
-        if let Some(owner) = nbt.get_uuid("Owner") {
-            self.owner.store(Some(owner));
-        }
+    fn as_nautilus(&self) -> Option<&NautilusEntity> {
+        Some(self)
     }
 
-    fn get_mob_entity(&self) -> &MobEntity {
-        &self.mob_entity
+    fn as_custom_sound(&self) -> Option<&dyn CustomSound> {
+        Some(self)
     }
 
-    fn mob_init_data_tracker(&self) {
-        self.mob_entity.living_entity.entity.set_synced_data(
-            pumpkin_data::tracked_data::nautilus::DASH,
-            self.is_dashing(),
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        let under_water = self.get_entity().is_under_water();
+        Some(match (self.is_baby(), under_water) {
+            (true, true) => Sound::EntityBabyNautilusAmbient,
+            (true, false) => Sound::EntityBabyNautilusAmbientLand,
+            (false, true) => Sound::EntityNautilusAmbient,
+            (false, false) => Sound::EntityNautilusAmbientLand,
+        })
+    }
+
+    fn mob_get_swim_sound(&self) -> Option<Sound> {
+        Some(if self.is_baby() {
+            Sound::EntityBabyNautilusSwim
+        } else {
+            Sound::EntityNautilusSwim
+        })
+    }
+
+    fn mob_play_step_sound(&self, _pos: &BlockPos, _state: &BlockState) {}
+
+    fn mob_is_pushed_by_fluids(&self) -> bool {
+        false
+    }
+
+    fn get_walk_target_value(&self, _pos: &BlockPos) -> f32 {
+        0.0
+    }
+
+    fn travel_in_water(&self, caller: &dyn EntityBase, _gravity: f64, _falling: bool) {
+        let living = &self.mob_entity.living_entity;
+        living.entity.update_velocity_from_input(
+            living.movement_input.load(),
+            f64::from(living.get_speed()),
         );
+        living.make_move(caller);
+        living
+            .entity
+            .velocity
+            .store(living.entity.velocity.load() * NAUTILUS_WATER_RESISTANCE);
+    }
+
+    fn check_spawn_obstruction(&self, world: &World) -> bool {
+        super::water_animal::check_spawn_obstruction(self, world)
+    }
+
+    fn mob_max_air_supply(&self) -> i32 {
+        NAUTILUS_TOTAL_AIR_SUPPLY
+    }
+
+    fn base_tick(&self) {
+        if self.mob_entity.is_no_ai() {
+            self.mob_entity.living_entity.tick_air_supply(self);
+        } else {
+            self.handle_air_supply(self.get_entity().air_supply.load(Ordering::Relaxed));
+        }
     }
 
     fn mob_tick(&self, _caller: &dyn EntityBase) {
         tick_abstract_nautilus(
-            &self.mob_entity,
+            self,
             &self.dash_cooldown,
             self.is_dashing(),
             |dashing| self.set_dashing(dashing),
@@ -298,15 +445,49 @@ impl Mob for NautilusEntity {
         );
     }
 
-    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
-        interact_abstract_nautilus(
-            self,
-            player,
-            item_stack,
-            self.is_tame(),
-            |owner| self.set_tame(true, Some(owner)),
-            || self.get_eat_sound(),
-        )
+    fn on_damage_with_context(
+        &self,
+        _damage_type: DamageType,
+        source: Option<&dyn EntityBase>,
+        cause: Option<&dyn EntityBase>,
+    ) -> bool {
+        if let Some(attacker) = cause.or(source)
+            && attacker.get_living_entity().is_some()
+        {
+            self.set_anger_target(attacker);
+        }
+        true
+    }
+
+    fn tick_links(&self) -> Vec<i32> {
+        let angry_at = self
+            .mob_entity
+            .try_with_brain(self, |brain| brain.get(types::ANGRY_AT).copied())
+            .flatten();
+        let world = self.get_entity().world.load();
+        angry_at
+            .and_then(|uuid| find_by_uuid(&world, uuid))
+            .map(|entity| entity.get_entity().entity_id)
+            .into_iter()
+            .collect()
+    }
+
+    fn can_be_leashed(&self) -> bool {
+        !self.is_aggravated()
+    }
+
+    fn remove_when_far_away(&self, _distance_sq: f64) -> bool {
+        true
+    }
+
+    fn requires_custom_persistence(&self) -> bool {
+        self.is_tame()
+    }
+
+    fn can_dispenser_equip_into_slot(&self, slot: &EquipmentSlot) -> bool {
+        *slot == EquipmentSlot::BODY
+            || *slot == EquipmentSlot::SADDLE
+            || self.mob_entity.can_pick_up_loot()
     }
 
     fn can_use_slot(&self, slot: &EquipmentSlot) -> bool {
@@ -316,168 +497,214 @@ impl Mob for NautilusEntity {
     fn get_equip_sound(&self, slot: &EquipmentSlot) -> Option<Sound> {
         nautilus_equip_sound(self.get_entity(), slot)
     }
+
+    fn mob_controlling_passenger(&self) -> Option<Arc<dyn EntityBase>> {
+        self.saddled_controlling_passenger(None)
+    }
+
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        entity.set_synced_data(
+            pumpkin_data::tracked_data::nautilus::DASH,
+            self.is_dashing(),
+        );
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        self.mob_entity
+            .read_legacy_saddle(nbt.get_bool("Saddled") == Some(true));
+    }
+
+    fn mob_interact_with_hand(
+        &self,
+        _player: &Arc<Player>,
+        _item_stack: &mut ItemStack,
+        _hand: pumpkin_util::Hand,
+    ) -> Option<bool> {
+        self.mob_entity.set_persistence_required();
+        None
+    }
+
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        interact_abstract_nautilus(self, player, item_stack, || {
+            self.open_custom_inventory_screen(player);
+            true
+        })
+    }
+}
+
+pub(super) fn use_nautilus_player_item(player: &Arc<Player>, item_stack: &mut ItemStack) {
+    if item_stack
+        .get_item()
+        .has_tag(&tag::Item::MINECRAFT_NAUTILUS_BUCKET_FOOD)
+    {
+        create_filled_result(
+            item_stack,
+            player,
+            ItemStack::new(1, &Item::WATER_BUCKET),
+            true,
+        );
+    } else {
+        item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+    }
+}
+
+fn apply_effects(mob: &dyn Mob) {
+    let Some(passenger) = mob.get_mob_entity().first_passenger() else {
+        return;
+    };
+    let Some(player) = passenger.get_player() else {
+        return;
+    };
+    let has_effect = player
+        .living_entity
+        .has_effect(&StatusEffect::BREATH_OF_THE_NAUTILUS);
+    let should_refresh = mob.get_entity().world.load().get_world_age() % EFFECT_REFRESH_RATE == 0;
+    if !has_effect || should_refresh {
+        player.add_effect(Effect {
+            effect_type: &StatusEffect::BREATH_OF_THE_NAUTILUS,
+            duration: EFFECT_DURATION,
+            amplifier: 0,
+            ambient: true,
+            show_particles: true,
+            show_icon: true,
+            blend: true,
+        });
+    }
+}
+
+pub(super) fn set_abstract_nautilus_dashing(
+    entity: &Entity,
+    dashing_flag: &AtomicBool,
+    dash_cooldown: &AtomicI32,
+    dash_data: TrackedData,
+    dashing: bool,
+) {
+    let changed = dashing_flag.swap(dashing, Ordering::Relaxed) != dashing;
+    entity.set_synced_data(dash_data, dashing);
+    if changed && entity.tick_count.load(Ordering::Relaxed) > 0 {
+        let _ = dash_cooldown.compare_exchange(
+            0,
+            DASH_COOLDOWN_TICKS,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+    }
+}
+
+pub(super) fn handle_abstract_nautilus_start_jump(
+    mob: &dyn Mob,
+    dash_sound: Sound,
+    set_dashing: impl FnOnce(bool),
+) {
+    mob.make_sound(dash_sound);
+    mob.get_entity()
+        .emit_own_game_event(mob, GameEvent::EntityAction);
+    set_dashing(true);
 }
 
 pub(super) fn tick_abstract_nautilus(
-    mob_entity: &MobEntity,
+    mob: &dyn Mob,
     dash_cooldown: &AtomicI32,
     is_dashing: bool,
     set_dashing: impl FnOnce(bool),
     dash_ready_sound: impl FnOnce() -> Sound,
 ) {
-    let entity = &mob_entity.living_entity.entity;
-
-    if let Ok(passengers) = entity.passengers.try_lock()
-        && let Some(passenger) = passengers.first()
-        && let Some(player) = passenger.cast_any().downcast_ref::<Player>()
+    apply_effects(mob);
+    if is_dashing
+        && dash_cooldown.load(Ordering::Relaxed) < DASH_COOLDOWN_TICKS - DASH_MINIMUM_DURATION_TICKS
     {
-        let world = entity.world.load();
-        let has_effect = player
-            .living_entity
-            .has_effect(&StatusEffect::BREATH_OF_THE_NAUTILUS);
-        if (!has_effect || world.get_world_age() % 40 == 0)
-            && let Some(p) = world.get_player_by_uuid(player.gameprofile.id)
-        {
-            p.add_effect(Effect {
-                effect_type: &StatusEffect::BREATH_OF_THE_NAUTILUS,
-                duration: 60,
-                amplifier: 0,
-                ambient: true,
-                show_particles: true,
-                show_icon: true,
-                blend: true,
-            });
-        }
-    }
-
-    if is_dashing && dash_cooldown.load(Ordering::Relaxed) < 35 {
         set_dashing(false);
     }
-
     let cooldown = dash_cooldown.load(Ordering::Relaxed);
     if cooldown > 0 {
-        let next = cooldown - 1;
-        dash_cooldown.store(next, Ordering::Relaxed);
-        if next == 0 {
-            entity.world.load().play_sound(
-                dash_ready_sound(),
-                SoundCategory::Neutral,
-                &entity.pos.load(),
-            );
-        }
-    }
-
-    if entity.touching_water.load(Ordering::Relaxed) {
-        let velo = entity.velocity.load();
-        let speed = velo.length();
-        let prob = (speed * 2.0).clamp(0.15, 1.0);
-        if rand::random::<f64>() < prob {
-            let world = entity.world.load();
-            let pos = entity.pos.load();
-            world.spawn_particle(
-                pos + Vector3::new(0.0, 0.25, 0.0),
-                Vector3::new(0.4, 0.4, 0.4),
-                0.5,
-                2,
-                Particle::Bubble,
-            );
+        dash_cooldown.store(cooldown - 1, Ordering::Relaxed);
+        if cooldown == 1 {
+            mob.make_sound(dash_ready_sound());
         }
     }
 }
 
-pub(super) fn interact_abstract_nautilus<M: Animal>(
+fn try_to_tame<M: TamableAnimal>(mob: &M, player: &Arc<Player>) {
+    let entity = mob.get_entity();
+    let world = entity.world.load();
+    if mob.get_random().random_range(0..TAMING_CHANCE) == 0 && mob.approve_taming(player) {
+        TamableAnimal::tame(mob, player.gameprofile.id);
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
+        world.send_entity_status(
+            entity,
+            EntityStatus::TamingSucceeded,
+            ActorEventID::TamingSucceeded,
+        );
+    } else {
+        world.send_entity_status(
+            entity,
+            EntityStatus::TamingFailed,
+            ActorEventID::TamingFailed,
+        );
+    }
+    mob.play_eating_sound();
+}
+
+fn do_player_ride(mob: &dyn Mob, player: &Arc<Player>) {
+    let entity = mob.get_entity();
+    if !entity.has_passengers()
+        && let Some(vehicle) = entity.world.load().get_entity_by_id(entity.entity_id)
+    {
+        entity.add_passenger(vehicle, player.clone());
+    }
+    if !entity.has_passengers() {
+        mob.get_mob_entity().clear_home();
+    }
+}
+
+pub(super) fn interact_abstract_nautilus<M: TamableAnimal>(
     mob: &M,
     player: &Arc<Player>,
     item_stack: &mut ItemStack,
-    is_tame: bool,
-    on_tamed: impl FnOnce(Uuid),
-    eat_sound: impl FnOnce() -> Sound,
+    open_inventory: impl FnOnce() -> bool,
 ) -> bool {
-    use pumpkin_data::tag::{self, Taggable};
-
-    let mob_entity = mob.get_mob_entity();
-    let entity = &mob_entity.living_entity.entity;
-
-    let consume_nautilus_food = |item_stack: &mut ItemStack| {
-        if item_stack
-            .item
-            .has_tag(&tag::Item::MINECRAFT_NAUTILUS_BUCKET_FOOD)
-        {
-            crate::item::items::bucket::fill_bucket_stack(
-                item_stack,
-                player,
-                &pumpkin_data::item::Item::WATER_BUCKET,
-            );
-        } else {
-            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-        }
-    };
-
-    if !is_tame && mob.is_food(item_stack) {
-        consume_nautilus_food(item_stack);
-        let world = entity.world.load();
-        if rand::random::<u32>().is_multiple_of(3) && mob.approve_taming(player) {
-            on_tamed(player.gameprofile.id);
-            mob_entity
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
-            world.send_entity_status(
-                entity,
-                EntityStatus::TamingSucceeded,
-                ActorEventID::TamingSucceeded,
-            );
-        } else {
-            world.send_entity_status(
-                entity,
-                EntityStatus::TamingFailed,
-                ActorEventID::TamingFailed,
-            );
-        }
-        world.play_sound(eat_sound(), SoundCategory::Neutral, &entity.pos.load());
+    if let Some(result) = mob.handle_important_interactions(player, item_stack) {
+        return result;
+    }
+    if mob.get_mob_entity().living_entity.is_baby() {
+        return mob.animal_interact(player, item_stack);
+    }
+    let is_tame = mob.is_tame();
+    let sneaking = player.get_entity().is_sneaking();
+    if is_tame && sneaking && open_inventory() {
         return true;
     }
-
-    if !item_stack.is_empty()
-        && mob.is_food(item_stack)
-        && mob_entity.living_entity.health.load() < mob_entity.living_entity.get_max_health()
-    {
-        let heal = item_stack
-            .get_data_component::<pumpkin_data::data_component_impl::FoodImpl>()
-            .map_or(1.0, |food| 2.0 * food.nutrition as f32);
-        consume_nautilus_food(item_stack);
-        mob_entity.living_entity.heal(heal);
-        entity
-            .world
-            .load()
-            .play_sound(eat_sound(), SoundCategory::Neutral, &entity.pos.load());
-        return true;
-    }
-
-    if is_tame && !player.get_entity().is_sneaking() {
+    if !item_stack.is_empty() {
+        if !is_tame && mob.is_food(item_stack) {
+            mob.use_player_item(player, item_stack);
+            try_to_tame(mob, player);
+            return true;
+        }
+        let living = &mob.get_mob_entity().living_entity;
+        if mob.is_food(item_stack) && living.health.load() < living.get_max_health() {
+            mob.feed(player, item_stack, FEED_HEALING_FACTOR, FEED_DEFAULT_HEAL);
+            return true;
+        }
         if equip_on_target(mob, player, item_stack) {
             return true;
         }
-
-        if !mob.is_food(item_stack) {
-            let world = player.world();
-            if let Some(vehicle) = world.get_entity_by_id(entity.entity_id)
-                && let Some(passenger) = world.get_player_by_id(player.entity_id())
-            {
-                entity.add_passenger(vehicle, passenger as Arc<dyn EntityBase>);
-                return true;
-            }
-        }
     }
-
+    if is_tame && !sneaking && !mob.is_food(item_stack) {
+        do_player_ride(mob, player);
+        return true;
+    }
     mob.animal_interact(player, item_stack)
 }
 
 pub(super) fn nautilus_can_use_slot(mob: &dyn Mob, slot: &EquipmentSlot) -> bool {
     (*slot != EquipmentSlot::SADDLE && *slot != EquipmentSlot::BODY)
-        || (mob.get_entity().is_alive()
-            && mob.as_ageable().is_none_or(|a| !a.is_baby())
+        || (mob.get_mob_entity().living_entity.is_alive()
+            && !mob.get_mob_entity().living_entity.is_baby()
             && mob.is_tamed())
 }
 

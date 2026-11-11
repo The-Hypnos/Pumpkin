@@ -1,5 +1,5 @@
 use std::sync::{
-    Arc, Mutex,
+    Arc,
     atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering},
 };
 use uuid::Uuid;
@@ -8,13 +8,14 @@ use pumpkin_data::{
     BlockState,
     data_component::DataComponent,
     data_component_impl::{DataComponentImpl, EquipmentSlot, ZombieNautilusVariantImpl},
-    item::Item,
     item_stack::ItemStack,
     sound::Sound,
     tag::{self, Taggable},
     tracked_data,
     zombie_nautilus_variant::ZombieNautilusVariant,
 };
+use pumpkin_inventory::inventory::SimpleInventory;
+use pumpkin_inventory::mount_screen_handler::MountScreenHandler;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_util::math::position::BlockPos;
@@ -33,10 +34,12 @@ use crate::{
             spawn::{EntitySpawnReason, SpawnGroupData},
         },
         passive::{
+            abstract_horse::{bedrock_equip_slot_nbt, open_mount_inventory},
             animal::Animal,
             nautilus::{
-                interact_abstract_nautilus, nautilus_can_use_slot, nautilus_equip_sound,
-                tick_abstract_nautilus,
+                INVENTORY_COLUMNS, handle_abstract_nautilus_start_jump, interact_abstract_nautilus,
+                nautilus_can_use_slot, nautilus_equip_sound, set_abstract_nautilus_dashing,
+                tick_abstract_nautilus, use_nautilus_player_item,
             },
             tamable::{TamableAnimal, TamableData},
         },
@@ -51,7 +54,7 @@ pub struct ZombieNautilusEntity {
     pub tamable_data: TamableData,
     pub is_dashing: AtomicBool,
     pub dash_cooldown: AtomicI32,
-    pub inventory: Mutex<Vec<ItemStack>>,
+    inventory: Arc<SimpleInventory>,
     pub variant: AtomicU8,
 }
 
@@ -72,7 +75,7 @@ impl ZombieNautilusEntity {
             tamable_data: TamableData::default(),
             is_dashing: AtomicBool::new(false),
             dash_cooldown: AtomicI32::new(0),
-            inventory: Mutex::new(vec![ItemStack::new(0, &Item::AIR); 9]),
+            inventory: Arc::new(SimpleInventory::new(0)),
             variant: AtomicU8::new(ZombieNautilusVariant::default().id()),
         });
 
@@ -94,11 +97,24 @@ impl ZombieNautilusEntity {
     }
 
     pub fn set_dashing(&self, dashing: bool) {
-        self.is_dashing.store(dashing, Ordering::Relaxed);
-        self.mob_entity
-            .living_entity
-            .entity
-            .set_synced_data(tracked_data::zombie_nautilus::DASH, dashing);
+        set_abstract_nautilus_dashing(
+            self.get_entity(),
+            &self.is_dashing,
+            &self.dash_cooldown,
+            tracked_data::zombie_nautilus::DASH,
+            dashing,
+        );
+    }
+
+    #[must_use]
+    pub fn can_jump(&self) -> bool {
+        self.is_saddled()
+    }
+
+    pub fn handle_start_jump(&self) {
+        handle_abstract_nautilus_start_jump(self, self.get_dash_sound(), |dashing| {
+            self.set_dashing(dashing);
+        });
     }
 
     pub fn set_variant(&self, variant: ZombieNautilusVariant) {
@@ -129,6 +145,21 @@ impl ZombieNautilusEntity {
         } else {
             Sound::EntityZombieNautilusDashLand
         }
+    }
+
+    pub fn open_custom_inventory_screen(&self, player: &Arc<Player>) {
+        open_mount_inventory(
+            self,
+            player,
+            &self.inventory,
+            INVENTORY_COLUMNS,
+            MountScreenHandler::SLOT_SADDLE,
+            bedrock_equip_slot_nbt("minecraft:saddle", 0),
+            |mob| {
+                mob.as_zombie_nautilus()
+                    .map(|nautilus| nautilus.inventory.clone())
+            },
+        );
     }
 
     #[must_use]
@@ -180,6 +211,10 @@ impl Animal for ZombieNautilusEntity {
         }
     }
 
+    fn use_player_item(&self, player: &Arc<Player>, item_stack: &mut ItemStack) {
+        use_nautilus_player_item(player, item_stack);
+    }
+
     fn can_mate(&self, _partner: &dyn EntityBase) -> bool {
         false
     }
@@ -211,6 +246,10 @@ impl CustomSound for ZombieNautilusEntity {
 
 impl Mob for ZombieNautilusEntity {
     fn as_ageable(&self) -> Option<&dyn AgeableMob> {
+        Some(self)
+    }
+
+    fn as_zombie_nautilus(&self) -> Option<&Self> {
         Some(self)
     }
 
@@ -359,7 +398,7 @@ impl Mob for ZombieNautilusEntity {
 
     fn mob_tick(&self, _caller: &dyn EntityBase) {
         tick_abstract_nautilus(
-            &self.mob_entity,
+            self,
             &self.dash_cooldown,
             self.is_dashing(),
             |dashing| self.set_dashing(dashing),
@@ -380,14 +419,10 @@ impl Mob for ZombieNautilusEntity {
     }
 
     fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
-        interact_abstract_nautilus(
-            self,
-            player,
-            item_stack,
-            self.is_tame(),
-            |owner| self.tame(owner),
-            || Sound::EntityZombieNautilusEat,
-        )
+        interact_abstract_nautilus(self, player, item_stack, || {
+            self.open_custom_inventory_screen(player);
+            true
+        })
     }
 }
 
@@ -428,6 +463,35 @@ mod tests {
         assert!(written.get("Age").is_none());
 
         world.level.shutdown().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_dash_lasts_six_ticks_and_is_ready_again_after_forty() -> TestResult {
+        let folder = tempfile::tempdir()?;
+        let world = world(&folder);
+        let nautilus = ZombieNautilusEntity::new(Entity::new(
+            world.clone(),
+            Vector3::new(0.0, 60.0, 0.0),
+            &EntityType::ZOMBIE_NAUTILUS,
+        ));
+        nautilus.get_entity().tick_count.store(1, Ordering::Relaxed);
+
+        nautilus.handle_start_jump();
+        let mut dashing = Vec::new();
+        let mut ready_at = None;
+        for tick in 1..=40 {
+            nautilus.mob_tick(nautilus.as_ref());
+            dashing.push(nautilus.is_dashing());
+            if ready_at.is_none() && nautilus.dash_cooldown.load(Ordering::Relaxed) == 0 {
+                ready_at = Some(tick);
+            }
+        }
+        world.level.shutdown().await;
+
+        assert_eq!(dashing.iter().take_while(|dashing| **dashing).count(), 6);
+        assert!(dashing[6..].iter().all(|dashing| !dashing));
+        assert_eq!(ready_at, Some(40));
         Ok(())
     }
 }

@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:function",
+  "environment": "minecraft:default",
+  "structure": "minecraft:empty",
+  "function": "pumpkin:nautilus_dries_out_on_land",
+  "max_ticks": 240,
+  "setup_ticks": 0
+}

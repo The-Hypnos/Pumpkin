@@ -166,7 +166,7 @@ pub fn get_living_entity_from_uuid_memory(
     memory: MemoryModuleType<Uuid>,
 ) -> Option<Arc<dyn EntityBase>> {
     let uuid = *brain.get(memory)?;
-    let entity = world.get_entity_by_uuid(uuid)?;
+    let entity = crate::entity::mob::neutral::find_by_uuid(world, uuid)?;
     entity.get_living_entity().is_some().then_some(entity)
 }
 

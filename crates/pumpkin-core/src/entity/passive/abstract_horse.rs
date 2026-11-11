@@ -535,16 +535,6 @@ pub trait AbstractHorse: Animal + AgeableMob {
         start_riding(self, player);
     }
 
-    /// Name tags and spawn eggs, which come before any horse-specific handling.
-    fn handle_important_interactions(
-        &self,
-        _player: &Arc<Player>,
-        stack: &mut ItemStack,
-    ) -> Option<bool> {
-        (stack.item == &Item::NAME_TAG || stack.item.registry_key.ends_with("_spawn_egg"))
-            .then_some(false)
-    }
-
     /// The feeding, anger and chest checks horses, zombie horses and chested horses run before
     /// the shared interaction.
     fn interact_with_held_item(
@@ -763,55 +753,14 @@ pub trait AbstractHorse: Animal + AgeableMob {
     }
 
     fn open_custom_inventory_screen(&self, player: &Arc<Player>) {
-        let entity = self.get_entity();
-        if (entity.has_passengers() && !entity.has_passenger(player.entity_id()))
-            || !self.is_tamed()
-        {
-            return;
-        }
-        let Some(mount) = entity.world.load().get_entity_by_id(entity.entity_id) else {
-            return;
-        };
-        let mount = Arc::downgrade(&mount);
-        let inventory = self.inventory();
-        let columns = self.get_inventory_columns();
-        let bedrock_equip_slot = self.bedrock_equip_slot();
-        player.open_mount_screen(
-            columns,
-            entity.entity_id,
-            bedrock_equip_slot,
+        open_mount_inventory(
+            self,
+            player,
+            &self.inventory(),
+            self.get_inventory_columns(),
+            self.bedrock_equip_slot(),
             self.bedrock_equip_slots(),
-            |sync_id, player_inventory| {
-                let mut handler = MountScreenHandler::new(
-                    sync_id,
-                    player_inventory,
-                    inventory.clone(),
-                    Arc::new(EquipmentSlotContainer::new(
-                        mount.clone(),
-                        EquipmentSlot::SADDLE,
-                    )),
-                    Arc::new(EquipmentSlotContainer::new(
-                        mount.clone(),
-                        EquipmentSlot::BODY,
-                    )),
-                    usize::try_from(columns).unwrap_or(0),
-                );
-                handler.bedrock_equip_slot = Some(bedrock_equip_slot);
-                handler.validity_check = Some(Box::new(move |player| {
-                    let Some(player) = player.as_any().downcast_ref::<Player>() else {
-                        return false;
-                    };
-                    mount.upgrade().is_some_and(|mount| {
-                        mount.get_entity().is_alive()
-                            && mount
-                                .get_mob()
-                                .and_then(|mob| mob.as_abstract_horse())
-                                .is_some_and(|horse| Arc::ptr_eq(&horse.inventory(), &inventory))
-                            && player.can_interact_with_entity(mount.as_ref(), 4.0)
-                    })
-                }));
-                Arc::new(Mutex::new(handler))
-            },
+            |mob| mob.as_abstract_horse().map(AbstractHorse::inventory),
         );
     }
 
@@ -1009,6 +958,63 @@ pub fn add_horse_behaviour_goals(horse: &dyn Mob) {
             &tag::Item::MINECRAFT_HORSE_TEMPT_ITEMS,
             false,
         )),
+    );
+}
+
+pub fn open_mount_inventory<M: Mob + ?Sized>(
+    mob: &M,
+    player: &Arc<Player>,
+    inventory: &Arc<SimpleInventory>,
+    columns: i32,
+    bedrock_equip_slot: usize,
+    bedrock_equip_slots: NbtCompound,
+    current_inventory: fn(&dyn Mob) -> Option<Arc<SimpleInventory>>,
+) {
+    let entity = mob.get_entity();
+    if (entity.has_passengers() && !entity.has_passenger(player.entity_id())) || !mob.is_tamed() {
+        return;
+    }
+    let Some(mount) = entity.world.load().get_entity_by_id(entity.entity_id) else {
+        return;
+    };
+    let mount = Arc::downgrade(&mount);
+    let inventory = inventory.clone();
+    player.open_mount_screen(
+        columns,
+        entity.entity_id,
+        bedrock_equip_slot,
+        bedrock_equip_slots,
+        |sync_id, player_inventory| {
+            let mut handler = MountScreenHandler::new(
+                sync_id,
+                player_inventory,
+                inventory.clone(),
+                Arc::new(EquipmentSlotContainer::new(
+                    mount.clone(),
+                    EquipmentSlot::SADDLE,
+                )),
+                Arc::new(EquipmentSlotContainer::new(
+                    mount.clone(),
+                    EquipmentSlot::BODY,
+                )),
+                usize::try_from(columns).unwrap_or(0),
+            );
+            handler.bedrock_equip_slot = Some(bedrock_equip_slot);
+            handler.validity_check = Some(Box::new(move |player| {
+                let Some(player) = player.as_any().downcast_ref::<Player>() else {
+                    return false;
+                };
+                mount.upgrade().is_some_and(|mount| {
+                    mount.get_entity().is_alive()
+                        && mount
+                            .get_mob()
+                            .and_then(current_inventory)
+                            .is_some_and(|current| Arc::ptr_eq(&current, &inventory))
+                        && player.can_interact_with_entity(mount.as_ref(), 4.0)
+                })
+            }));
+            Arc::new(Mutex::new(handler))
+        },
     );
 }
 

@@ -69,6 +69,20 @@ impl AnimalMakeLove {
         }
     }
 
+    #[must_use]
+    pub const fn with_speed(
+        partner_type: &'static EntityType,
+        speed_modifier: f32,
+        close_enough_distance: i32,
+    ) -> Self {
+        Self {
+            partner_type,
+            speed_modifier,
+            close_enough_distance,
+            spawn_child_at_time: 0,
+        }
+    }
+
     fn find_valid_breed_partner(&self, tick: &BrainTick<'_>) -> Option<Arc<dyn EntityBase>> {
         tick.state
             .get(types::NEAREST_VISIBLE_LIVING_ENTITIES)?

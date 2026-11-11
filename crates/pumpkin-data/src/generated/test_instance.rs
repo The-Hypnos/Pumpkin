@@ -342,6 +342,12 @@ pub fn get_test_instance_json(path: &str) -> Option<&'static str> {
         "pumpkin:loot_entity_context_and_nested_tables" => Some(include_str!(
             "../../../../assets/tests/datapacks/pumpkin-unit-test/data/pumpkin/test_instance/loot_entity_context_and_nested_tables.json"
         )),
+        "pumpkin:nautilus_charges_the_mob_that_hurt_it" => Some(include_str!(
+            "../../../../assets/tests/datapacks/pumpkin-unit-test/data/pumpkin/test_instance/nautilus_charges_the_mob_that_hurt_it.json"
+        )),
+        "pumpkin:nautilus_dries_out_on_land" => Some(include_str!(
+            "../../../../assets/tests/datapacks/pumpkin-unit-test/data/pumpkin/test_instance/nautilus_dries_out_on_land.json"
+        )),
         "pumpkin:note_block_instrument_and_power" => Some(include_str!(
             "../../../../assets/tests/datapacks/pumpkin-unit-test/data/pumpkin/test_instance/note_block_instrument_and_power.json"
         )),
@@ -791,6 +797,8 @@ pub const fn all_test_instance_names() -> &'static [&'static str] {
         "pumpkin:light_weighted_pressure_plate_counts_entities",
         "pumpkin:list_counts_visible_simulated_players",
         "pumpkin:loot_entity_context_and_nested_tables",
+        "pumpkin:nautilus_charges_the_mob_that_hurt_it",
+        "pumpkin:nautilus_dries_out_on_land",
         "pumpkin:note_block_instrument_and_power",
         "pumpkin:note_block_instruments_bone_iron_soul_pumpkin",
         "pumpkin:note_block_instruments_clay_gold_wool_ice",
